@@ -4,7 +4,7 @@
 #include "./duktape/duktape.h"
 #include "pvm.h"
 
-#define ADDRESS_LEN 41
+#define ADDRESS_LEN 50
 // load at most 1KB data
 #define MAX_LOAD_SIZE 1024
 
@@ -131,14 +131,8 @@ static duk_ret_t duk_pvm_get_storage(duk_context *ctx) {
   pvm_get_storage((uint8_t *)key, strlen(key), val, &val_size);
 
   duk_buffer_to_string(ctx, -1);
-<<<<<<< HEAD
-  const char *args_str = duk_get_string(ctx, -1);
-  duk_pop(ctx);
-  duk_push_string(ctx, args_str);
-=======
   duk_push_string(ctx, duk_safe_to_string(ctx, -1));
 
->>>>>>> f618a23f63f1d4d91c00b9edfdfadd206bde53ea
   return 1;
 }
 
@@ -149,18 +143,11 @@ static duk_ret_t duk_pvm_set_storage(duk_context *ctx) {
     return duk_throw(ctx);
   }
 
-<<<<<<< HEAD
-  const char *key = duk_get_string(ctx, -2);
-  const char *val = duk_get_string(ctx, -1);
-=======
   const char *key = duk_safe_to_string(ctx, -2);
   const char *val = duk_safe_to_string(ctx, -1);
   duk_pop_n(ctx, 2);
->>>>>>> f618a23f63f1d4d91c00b9edfdfadd206bde53ea
 
   pvm_set_storage((uint8_t *)key, strlen(key), (uint8_t *)val, strlen(val));
-  duk_pop_n(ctx, 2);
-
   return 0;
 }
 
@@ -169,9 +156,9 @@ static duk_ret_t duk_pvm_is_init(duk_context *ctx) {
   pvm_is_init(&is_init);
 
   if (0 == is_init) {
-      duk_push_true(ctx);
-  } else {
       duk_push_false(ctx);
+  } else {
+      duk_push_true(ctx);
   }
 
   return 1;

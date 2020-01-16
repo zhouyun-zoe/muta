@@ -49,9 +49,8 @@ static duk_ret_t duk_pvm_load_args(duk_context *ctx) {
   pvm_load_args(args, NULL);
 
   duk_buffer_to_string(ctx, -1);
-  const char *args_str = duk_get_string(ctx, -1);
-  duk_pop(ctx);
-  duk_push_string(ctx, args_str);
+  duk_push_string(ctx, duk_safe_to_string(ctx, -1));
+
   return 1;
 }
 
@@ -63,9 +62,8 @@ static duk_ret_t duk_pvm_origin(duk_context *ctx) {
   pvm_origin(args);
 
   duk_buffer_to_string(ctx, -1);
-  const char *args_str = duk_get_string(ctx, -1);
-  duk_pop(ctx);
-  duk_push_string(ctx, args_str);
+  duk_push_string(ctx, duk_safe_to_string(ctx, -1));
+
   return 1;
 }
 
@@ -89,9 +87,8 @@ static duk_ret_t duk_pvm_caller(duk_context *ctx) {
   pvm_caller(args);
 
   duk_buffer_to_string(ctx, -1);
-  const char *args_str = duk_get_string(ctx, -1);
-  duk_pop(ctx);
-  duk_push_string(ctx, args_str);
+  duk_push_string(ctx, duk_safe_to_string(ctx, -1));
+
   return 1;
 }
 
@@ -102,10 +99,7 @@ static duk_ret_t duk_pvm_load_json_args(duk_context *ctx) {
   pvm_load_args(args, NULL);
 
   duk_buffer_to_string(ctx, -1);
-  const char *json = duk_get_string(ctx, -1);
-  duk_pop(ctx);
-
-  duk_push_string(ctx, json);
+  duk_push_string(ctx, duk_safe_to_string(ctx, -1));
   duk_json_decode(ctx, -1);
 
   return 1;
@@ -127,7 +121,7 @@ static duk_ret_t duk_pvm_get_storage(duk_context *ctx) {
     return duk_throw(ctx);
   }
 
-  const char *key = duk_get_string(ctx, -1);
+  const char *key = duk_safe_to_string(ctx, -1);
   duk_pop(ctx);
 
   duk_push_fixed_buffer(ctx, MAX_LOAD_SIZE);
@@ -137,9 +131,14 @@ static duk_ret_t duk_pvm_get_storage(duk_context *ctx) {
   pvm_get_storage((uint8_t *)key, strlen(key), val, &val_size);
 
   duk_buffer_to_string(ctx, -1);
+<<<<<<< HEAD
   const char *args_str = duk_get_string(ctx, -1);
   duk_pop(ctx);
   duk_push_string(ctx, args_str);
+=======
+  duk_push_string(ctx, duk_safe_to_string(ctx, -1));
+
+>>>>>>> f618a23f63f1d4d91c00b9edfdfadd206bde53ea
   return 1;
 }
 
@@ -150,8 +149,14 @@ static duk_ret_t duk_pvm_set_storage(duk_context *ctx) {
     return duk_throw(ctx);
   }
 
+<<<<<<< HEAD
   const char *key = duk_get_string(ctx, -2);
   const char *val = duk_get_string(ctx, -1);
+=======
+  const char *key = duk_safe_to_string(ctx, -2);
+  const char *val = duk_safe_to_string(ctx, -1);
+  duk_pop_n(ctx, 2);
+>>>>>>> f618a23f63f1d4d91c00b9edfdfadd206bde53ea
 
   pvm_set_storage((uint8_t *)key, strlen(key), (uint8_t *)val, strlen(val));
   duk_pop_n(ctx, 2);
@@ -164,9 +169,9 @@ static duk_ret_t duk_pvm_is_init(duk_context *ctx) {
   pvm_is_init(&is_init);
 
   if (0 == is_init) {
-      duk_push_false(ctx);
-  } else {
       duk_push_true(ctx);
+  } else {
+      duk_push_false(ctx);
   }
 
   return 1;
@@ -179,8 +184,8 @@ static duk_ret_t duk_pvm_contract_call(duk_context *ctx) {
     return duk_throw(ctx);
   }
 
-  const char *addr = duk_get_string(ctx, -2);
-  const char *call_args = duk_get_string(ctx, -1);
+  const char *addr = duk_safe_to_string(ctx, -2);
+  const char *call_args = duk_safe_to_string(ctx, -1);
   duk_pop_n(ctx, 2);
 
   duk_push_fixed_buffer(ctx, MAX_LOAD_SIZE);
@@ -193,9 +198,8 @@ static duk_ret_t duk_pvm_contract_call(duk_context *ctx) {
   }
 
   duk_buffer_to_string(ctx, -1);
-  const char *args_str = duk_get_string(ctx, -1);
-  duk_pop(ctx);
-  duk_push_string(ctx, args_str);
+  duk_push_string(ctx, duk_safe_to_string(ctx, -1));
+
   return 1;
 }
 

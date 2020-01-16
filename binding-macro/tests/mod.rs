@@ -5,11 +5,12 @@ extern crate binding_macro;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
 use protocol::fixed_codec::FixedCodec;
 use protocol::traits::{
-    Service, ServiceSDK, StoreArray, StoreBool, StoreMap, StoreString, StoreUint64,
+    ExecutorParams, Service, ServiceSDK, StoreArray, StoreBool, StoreMap, StoreString, StoreUint64,
 };
 use protocol::types::{
     Address, Epoch, Hash, Receipt, ServiceContext, ServiceContextParams, SignedTransaction,
@@ -43,6 +44,33 @@ fn test_read_and_write() {
         t.test_write_fn(context, "write").unwrap(),
         "write".to_owned()
     );
+}
+
+#[test]
+fn test_hooks() {
+    struct Tests {
+        pub epoch_id: u64,
+    };
+
+    impl Tests {
+        #[hook_after]
+        fn hook_after(&mut self, params: &ExecutorParams) -> ProtocolResult<()> {
+            self.epoch_id = params.epoch_id;
+            Ok(())
+        }
+
+        #[hook_before]
+        fn hook_before(&mut self, params: &ExecutorParams) -> ProtocolResult<()> {
+            self.epoch_id = params.epoch_id;
+            Ok(())
+        }
+    }
+
+    let mut t = Tests { epoch_id: 0 };
+    t.hook_after(&mock_executor_params()).unwrap();
+    assert_eq!(t.epoch_id, 9);
+    t.hook_before(&mock_executor_params()).unwrap();
+    assert_eq!(t.epoch_id, 9);
 }
 
 #[test]
@@ -139,13 +167,13 @@ fn test_service() {
         }
 
         #[hook_before]
-        fn custom_hook_before(&mut self) -> ProtocolResult<()> {
+        fn custom_hook_before(&mut self, _params: &ExecutorParams) -> ProtocolResult<()> {
             self.hook_before = true;
             Ok(())
         }
 
         #[hook_after]
-        fn custom_hook_after(&mut self) -> ProtocolResult<()> {
+        fn custom_hook_after(&mut self, _params: &ExecutorParams) -> ProtocolResult<()> {
             self.hook_after = true;
             Ok(())
         }
@@ -205,10 +233,10 @@ fn test_service() {
     let write_res = test_service.write_(context);
     assert_eq!(write_res.is_err(), true);
 
-    test_service.hook_before_().unwrap();
+    test_service.hook_before_(&mock_executor_params()).unwrap();
     assert_eq!(test_service.hook_before, true);
 
-    test_service.hook_after_().unwrap();
+    test_service.hook_after_(&mock_executor_params()).unwrap();
     assert_eq!(test_service.hook_after, true);
 }
 
@@ -236,13 +264,13 @@ fn test_service_none_payload() {
         }
 
         #[hook_before]
-        fn custom_hook_before(&mut self) -> ProtocolResult<()> {
+        fn custom_hook_before(&mut self, _params: &ExecutorParams) -> ProtocolResult<()> {
             self.hook_before = true;
             Ok(())
         }
 
         #[hook_after]
-        fn custom_hook_after(&mut self) -> ProtocolResult<()> {
+        fn custom_hook_after(&mut self, _params: &ExecutorParams) -> ProtocolResult<()> {
             self.hook_after = true;
             Ok(())
         }
@@ -287,10 +315,10 @@ fn test_service_none_payload() {
     let write_res = test_service.write_(context);
     assert_eq!(write_res.is_err(), true);
 
-    test_service.hook_before_().unwrap();
+    test_service.hook_before_(&mock_executor_params()).unwrap();
     assert_eq!(test_service.hook_before, true);
 
-    test_service.hook_after_().unwrap();
+    test_service.hook_after_(&mock_executor_params()).unwrap();
     assert_eq!(test_service.hook_after, true);
 }
 
@@ -313,13 +341,13 @@ fn test_service_none_response() {
         }
 
         #[hook_before]
-        fn custom_hook_before(&mut self) -> ProtocolResult<()> {
+        fn custom_hook_before(&mut self, _params: &ExecutorParams) -> ProtocolResult<()> {
             self.hook_before = true;
             Ok(())
         }
 
         #[hook_after]
-        fn custom_hook_after(&mut self) -> ProtocolResult<()> {
+        fn custom_hook_after(&mut self, _params: &ExecutorParams) -> ProtocolResult<()> {
             self.hook_after = true;
             Ok(())
         }
@@ -360,10 +388,10 @@ fn test_service_none_response() {
     let write_res = test_service.write_(context);
     assert_eq!(write_res.is_err(), true);
 
-    test_service.hook_before_().unwrap();
+    test_service.hook_before_(&mock_executor_params()).unwrap();
     assert_eq!(test_service.hook_before, true);
 
-    test_service.hook_after_().unwrap();
+    test_service.hook_after_(&mock_executor_params()).unwrap();
     assert_eq!(test_service.hook_after, true);
 }
 
@@ -380,10 +408,20 @@ fn get_context(cycles_limit: u64, service: &str, method: &str, payload: &str) ->
         service_name: service.to_owned(),
         service_method: method.to_owned(),
         service_payload: payload.to_owned(),
+        extra: None,
         events: Rc::new(RefCell::new(vec![])),
     };
 
     ServiceContext::new(params)
+}
+
+fn mock_executor_params() -> ExecutorParams {
+    ExecutorParams {
+        state_root:   Hash::default(),
+        epoch_id:     9,
+        timestamp:    99,
+        cycles_limit: 99999,
+    }
 }
 
 struct MockServiceSDK;
@@ -484,6 +522,7 @@ impl ServiceSDK for MockServiceSDK {
     fn read(
         &self,
         _ctx: &ServiceContext,
+        _extra: Option<Bytes>,
         _service: &str,
         _method: &str,
         _payload: &str,
@@ -496,6 +535,7 @@ impl ServiceSDK for MockServiceSDK {
     fn write(
         &mut self,
         _ctx: &ServiceContext,
+        _extra: Option<Bytes>,
         _service: &str,
         _method: &str,
         _payload: &str,

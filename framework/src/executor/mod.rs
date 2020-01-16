@@ -150,7 +150,7 @@ impl<S: 'static + Storage, DB: 'static + TrieDB, Mapping: 'static + ServiceMappi
         Ok(())
     }
 
-    fn hook(&mut self, hook: HookType) -> ProtocolResult<()> {
+    fn hook(&mut self, hook: HookType, exec_params: &ExecutorParams) -> ProtocolResult<()> {
         for name in self.service_mapping.list_service_name().into_iter() {
             let state = self
                 .states
@@ -163,8 +163,8 @@ impl<S: 'static + Storage, DB: 'static + TrieDB, Mapping: 'static + ServiceMappi
             let mut service = self.service_mapping.get_service(name.as_str(), sdk)?;
 
             match hook {
-                HookType::Before => service.hook_before_()?,
-                HookType::After => service.hook_after_()?,
+                HookType::Before => service.hook_before_(exec_params)?,
+                HookType::After => service.hook_after_(exec_params)?,
             };
 
             state.borrow_mut().stash()?;
@@ -213,6 +213,7 @@ impl<S: 'static + Storage, DB: 'static + TrieDB, Mapping: 'static + ServiceMappi
             service_name: request.service_name.to_owned(),
             service_method: request.method.to_owned(),
             service_payload: request.payload.to_owned(),
+            extra: None,
             events: Rc::new(RefCell::new(vec![])),
         };
 
@@ -274,7 +275,7 @@ impl<S: 'static + Storage, DB: 'static + TrieDB, Mapping: 'static + ServiceMappi
         params: &ExecutorParams,
         txs: &[SignedTransaction],
     ) -> ProtocolResult<ExecutorResp> {
-        self.hook(HookType::Before)?;
+        self.hook(HookType::Before, params)?;
 
         let mut receipts = txs
             .iter()
@@ -314,7 +315,7 @@ impl<S: 'static + Storage, DB: 'static + TrieDB, Mapping: 'static + ServiceMappi
             })
             .collect::<Result<Vec<Receipt>, ProtocolError>>()?;
 
-        self.hook(HookType::After)?;
+        self.hook(HookType::After, params)?;
 
         let state_root = self.commit()?;
         let mut all_cycles_used = 0;

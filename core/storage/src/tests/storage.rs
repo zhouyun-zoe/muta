@@ -105,18 +105,3 @@ fn test_storage_wal_insert() {
     let info_2 = exec!(storage.load_muta_wal());
     assert_eq!(info, info_2);
 }
-
-#[test]
-fn test_storage_wal_insert() {
-    let storage = ImplStorage::new(Arc::new(MemoryAdapter::new()));
-
-    let info = get_random_bytes(64);
-    exec!(storage.update_overlord_wal(info.clone()));
-    let info_2 = exec!(storage.load_overlord_wal());
-    assert_eq!(info, info_2);
-
-    let info = get_random_bytes(64);
-    exec!(storage.update_muta_wal(info.clone()));
-    let info_2 = exec!(storage.load_muta_wal());
-    assert_eq!(info, info_2);
-}

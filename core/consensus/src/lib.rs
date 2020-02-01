@@ -5,6 +5,7 @@ pub mod fixed_types;
 pub mod message;
 pub mod status;
 pub mod synchronization;
+#[cfg(test)]
 mod tests;
 pub mod trace;
 pub mod util;

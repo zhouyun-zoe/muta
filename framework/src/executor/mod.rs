@@ -152,22 +152,19 @@ impl<S: 'static + Storage, DB: 'static + TrieDB, Mapping: 'static + ServiceMappi
 
     fn hook(&mut self, hook: HookType, exec_params: &ExecutorParams) -> ProtocolResult<()> {
         for name in self.service_mapping.list_service_name().into_iter() {
-            let state = self
-                .states
-                .get(&name)
-                .ok_or(ExecutorError::NotFoundService {
-                    service: name.to_owned(),
-                })?;
-
             let sdk = self.get_sdk(&name)?;
             let mut service = self.service_mapping.get_service(name.as_str(), sdk)?;
 
-            match hook {
-                HookType::Before => service.hook_before_(exec_params)?,
-                HookType::After => service.hook_after_(exec_params)?,
+            let hook_ret = match hook {
+                HookType::Before => service.hook_before_(exec_params),
+                HookType::After => service.hook_after_(exec_params),
             };
 
-            state.borrow_mut().stash()?;
+            if hook_ret.is_err() {
+                self.revert_cache()?;
+            } else {
+                self.stash()?;
+            }
         }
         Ok(())
     }
@@ -208,7 +205,7 @@ impl<S: 'static + Storage, DB: 'static + TrieDB, Mapping: 'static + ServiceMappi
             cycles_price,
             cycles_used: Rc::new(RefCell::new(0)),
             caller: caller.clone(),
-            epoch_id: params.epoch_id,
+            height: params.height,
             timestamp: params.timestamp,
             service_name: request.service_name.to_owned(),
             service_method: request.method.to_owned(),
@@ -301,7 +298,7 @@ impl<S: 'static + Storage, DB: 'static + TrieDB, Mapping: 'static + ServiceMappi
 
                 Ok(Receipt {
                     state_root:  MerkleRoot::from_empty(),
-                    epoch_id:    context.get_current_epoch_id(),
+                    height:      context.get_current_height(),
                     tx_hash:     stx.tx_hash.clone(),
                     cycles_used: context.get_cycles_used(),
                     events:      context.get_events(),

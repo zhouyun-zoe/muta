@@ -159,12 +159,12 @@ where
         let (err_tx, err_rx) = unbounded();
         let (signal_tx, interval_reached) = channel(1);
 
-        runtime::spawn(IntervalTxsBroadcaster::timer(
+        tokio::spawn(IntervalTxsBroadcaster::timer(
             signal_tx,
             broadcast_txs_interval,
         ));
 
-        runtime::spawn(IntervalTxsBroadcaster::broadcast(
+        tokio::spawn(IntervalTxsBroadcaster::broadcast(
             stx_rx,
             interval_reached,
             broadcast_txs_size,
@@ -255,8 +255,8 @@ where
         }
 
         // Verify chain id
-        let latest_epoch = self.storage.get_latest_epoch().await?;
-        if latest_epoch.header.chain_id != stx.raw.chain_id {
+        let latest_block = self.storage.get_latest_block().await?;
+        if latest_block.header.chain_id != stx.raw.chain_id {
             let wrong_chain_id = MemPoolError::WrongChain {
                 tx_hash: stx.tx_hash,
             };
@@ -265,10 +265,10 @@ where
         }
 
         // Verify timeout
-        let latest_epoch_id = latest_epoch.header.epoch_id;
+        let latest_height = latest_block.header.height;
         let timeout_gap = self.timeout_gap.load(Ordering::SeqCst);
 
-        if stx.raw.timeout > latest_epoch_id + timeout_gap {
+        if stx.raw.timeout > latest_height + timeout_gap {
             let invalid_timeout = MemPoolError::InvalidTimeout {
                 tx_hash: stx.tx_hash,
             };
@@ -276,7 +276,7 @@ where
             return Err(invalid_timeout.into());
         }
 
-        if stx.raw.timeout < latest_epoch_id {
+        if stx.raw.timeout < latest_height {
             let timeout = MemPoolError::Timeout {
                 tx_hash: stx.tx_hash,
                 timeout: stx.raw.timeout,
@@ -302,9 +302,9 @@ where
         }
     }
 
-    async fn get_latest_epoch_id(&self, _ctx: Context) -> ProtocolResult<u64> {
-        let epoch_id = self.storage.get_latest_epoch().await?.header.epoch_id;
-        Ok(epoch_id)
+    async fn get_latest_height(&self, _ctx: Context) -> ProtocolResult<u64> {
+        let height = self.storage.get_latest_block().await?.header.height;
+        Ok(height)
     }
 }
 
@@ -412,19 +412,19 @@ mod tests {
         }};
     }
 
-    #[runtime::test(runtime_tokio::Tokio)]
+    #[tokio::test]
     async fn test_interval_timer() {
         let (tx, mut rx) = channel(1);
         let interval = Duration::from_millis(200);
         let now = Instant::now();
 
-        runtime::spawn(IntervalTxsBroadcaster::timer(tx, 200));
+        tokio::spawn(IntervalTxsBroadcaster::timer(tx, 200));
         rx.next().await.expect("await interval signal fail");
 
         assert!(now.elapsed().sub(interval).as_millis() < 100u128);
     }
 
-    #[runtime::test(runtime_tokio::Tokio)]
+    #[tokio::test]
     async fn test_interval_broadcast_reach_cache_size() {
         let (stx_tx, stx_rx) = unbounded();
         let (err_tx, _err_rx) = unbounded();
@@ -433,7 +433,7 @@ mod tests {
         let (broadcast_signal_tx, mut broadcast_signal_rx) = unbounded();
         let gossip = MockGossip::new(broadcast_signal_tx);
 
-        runtime::spawn(IntervalTxsBroadcaster::broadcast(
+        tokio::spawn(IntervalTxsBroadcaster::broadcast(
             stx_rx,
             interval_reached,
             tx_size,
@@ -453,7 +453,7 @@ mod tests {
         assert_eq!(msg.batch_stxs.len(), 10, "should only have 10 stx");
     }
 
-    #[runtime::test(runtime_tokio::Tokio)]
+    #[tokio::test]
     async fn test_interval_broadcast_reach_interval() {
         let (stx_tx, stx_rx) = unbounded();
         let (err_tx, _err_rx) = unbounded();
@@ -462,8 +462,8 @@ mod tests {
         let (broadcast_signal_tx, mut broadcast_signal_rx) = unbounded();
         let gossip = MockGossip::new(broadcast_signal_tx);
 
-        runtime::spawn(IntervalTxsBroadcaster::timer(signal_tx, 200));
-        runtime::spawn(IntervalTxsBroadcaster::broadcast(
+        tokio::spawn(IntervalTxsBroadcaster::timer(signal_tx, 200));
+        tokio::spawn(IntervalTxsBroadcaster::broadcast(
             stx_rx,
             interval_reached,
             tx_size,
@@ -483,7 +483,7 @@ mod tests {
         assert_eq!(msg.batch_stxs.len(), 9, "should only have 9 stx");
     }
 
-    #[runtime::test(runtime_tokio::Tokio)]
+    #[tokio::test]
     async fn test_interval_broadcast() {
         let (stx_tx, stx_rx) = unbounded();
         let (err_tx, _err_rx) = unbounded();
@@ -492,8 +492,8 @@ mod tests {
         let (broadcast_signal_tx, mut broadcast_signal_rx) = unbounded();
         let gossip = MockGossip::new(broadcast_signal_tx);
 
-        runtime::spawn(IntervalTxsBroadcaster::timer(signal_tx, 200));
-        runtime::spawn(IntervalTxsBroadcaster::broadcast(
+        tokio::spawn(IntervalTxsBroadcaster::timer(signal_tx, 200));
+        tokio::spawn(IntervalTxsBroadcaster::broadcast(
             stx_rx,
             interval_reached,
             tx_size,

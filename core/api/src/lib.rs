@@ -10,7 +10,6 @@ use std::sync::Arc;
 
 use futures::executor::block_on;
 use http::status::StatusCode;
-use juniper::graphiql::graphiql_source;
 use juniper::{FieldError, FieldResult};
 use tide::{Request, Response, ResultExt, Server};
 
@@ -22,14 +21,15 @@ use protocol::traits::{APIAdapter, Context};
 
 use crate::config::GraphQLConfig;
 use crate::schema::{
-    to_signed_transaction, to_transaction, Address, Bytes, Epoch, ExecResp, Hash,
+    to_signed_transaction, to_transaction, Address, Block, Bytes, ExecResp, Hash,
     InputRawTransaction, InputTransactionEncryption, Receipt, SignedTransaction, Uint64,
 };
 
 // This is accessible as state in Tide, and as executor context in Juniper.
 #[derive(Clone)]
 struct State {
-    adapter: Arc<Box<dyn APIAdapter>>,
+    graphiql_html: String,
+    adapter:       Arc<Box<dyn APIAdapter>>,
 }
 
 // We define `Query` unit struct here. GraphQL queries will refer to this
@@ -40,15 +40,19 @@ struct Query;
 // Switch to async/await fn https://github.com/graphql-rust/juniper/issues/2
 #[juniper::object(Context = State)]
 impl Query {
-    #[graphql(name = "getEpoch", description = "Get the epoch")]
-    fn get_latest_epoch(state_ctx: &State, epoch_id: Option<Uint64>) -> FieldResult<Epoch> {
-        let epoch_id = match epoch_id {
+    #[graphql(name = "getBlock", description = "Get the block")]
+    fn get_latest_block(state_ctx: &State, height: Option<Uint64>) -> FieldResult<Block> {
+        let height = match height {
             Some(id) => Some(id.try_into_u64()?),
             None => None,
         };
 
-        let epoch = block_on(state_ctx.adapter.get_epoch_by_id(Context::new(), epoch_id))?;
-        Ok(Epoch::from(epoch))
+        let block = block_on(
+            state_ctx
+                .adapter
+                .get_block_by_height(Context::new(), height),
+        )?;
+        Ok(Block::from(block))
     }
 
     #[graphql(name = "getTransaction", description = "Get the transaction by hash")]
@@ -80,7 +84,7 @@ impl Query {
     #[graphql(name = "queryService", description = "query service")]
     fn query_service(
         state_ctx: &State,
-        epoch_id: Option<Uint64>,
+        height: Option<Uint64>,
         cycles_limit: Option<Uint64>,
         cycles_price: Option<Uint64>,
         caller: Address,
@@ -88,12 +92,12 @@ impl Query {
         method: String,
         payload: String,
     ) -> FieldResult<ExecResp> {
-        let epoch_id = match epoch_id {
+        let height = match height {
             Some(id) => id.try_into_u64()?,
             None => {
-                block_on(state_ctx.adapter.get_epoch_by_id(Context::new(), None))?
+                block_on(state_ctx.adapter.get_block_by_height(Context::new(), None))?
                     .header
-                    .epoch_id
+                    .height
             }
         };
         let cycles_limit = match cycles_limit {
@@ -110,7 +114,7 @@ impl Query {
 
         let exec_resp = block_on(state_ctx.adapter.query_service(
             Context::new(),
-            epoch_id,
+            height,
             cycles_limit,
             cycles_price,
             address,
@@ -199,8 +203,8 @@ async fn handle_graphql(mut req: Request<State>) -> Response {
         .expect("Json parsing errors on return should never occur.")
 }
 
-async fn handle_graphiql(_: Request<State>) -> Response {
-    let html = graphiql_source("/graphql");
+async fn handle_graphiql(req: Request<State>) -> Response {
+    let html = req.state().graphiql_html.to_owned();
 
     Response::new(StatusCode::OK.into())
         .body_string(html)
@@ -208,8 +212,11 @@ async fn handle_graphiql(_: Request<State>) -> Response {
 }
 
 pub async fn start_graphql<Adapter: APIAdapter + 'static>(cfg: GraphQLConfig, adapter: Adapter) {
+    let graphiql_html = include_str!("../source/graphiql.html");
+
     let state = State {
-        adapter: Arc::new(Box::new(adapter)),
+        graphiql_html: graphiql_html.to_owned(),
+        adapter:       Arc::new(Box::new(adapter)),
     };
 
     let mut server = Server::with_state(state);

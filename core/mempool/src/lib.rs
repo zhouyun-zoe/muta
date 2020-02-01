@@ -16,7 +16,7 @@ pub use adapter::{DEFAULT_BROADCAST_TXS_INTERVAL, DEFAULT_BROADCAST_TXS_SIZE};
 use std::error::Error;
 
 use async_trait::async_trait;
-use derive_more::{Display, From};
+use derive_more::Display;
 
 use protocol::traits::{Context, MemPool, MemPoolAdapter, MixedTxHashes};
 use protocol::types::{Hash, SignedTransaction};
@@ -97,12 +97,12 @@ where
     }
 
     async fn package(&self, ctx: Context, cycle_limit: u64) -> ProtocolResult<MixedTxHashes> {
-        let current_epoch_id = self.adapter.get_latest_epoch_id(ctx.clone()).await?;
+        let current_height = self.adapter.get_latest_height(ctx.clone()).await?;
 
         self.tx_cache.package(
             cycle_limit,
-            current_epoch_id,
-            current_epoch_id + self.timeout_gap,
+            current_height,
+            current_height + self.timeout_gap,
         )
     }
 
@@ -182,7 +182,7 @@ where
     }
 }
 
-#[derive(Debug, Display, From)]
+#[derive(Debug, Display)]
 pub enum MemPoolError {
     #[display(fmt = "Tx: {:?} inserts failed", tx_hash)]
     Insert { tx_hash: Hash },
@@ -219,6 +219,9 @@ pub enum MemPoolError {
 
     #[display(fmt = "Tx: {:?} invalid timeout", tx_hash)]
     InvalidTimeout { tx_hash: Hash },
+
+    #[display(fmt = "Batch insert error")]
+    BatchInsertErr,
 }
 
 impl Error for MemPoolError {}

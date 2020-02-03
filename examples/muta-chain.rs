@@ -1,5 +1,6 @@
 use asset::AssetService;
 use derive_more::{Display, From};
+use metadata::MetadataService;
 use muta::MutaBuilder;
 use protocol::traits::{Service, ServiceMapping, ServiceSDK};
 use protocol::{ProtocolError, ProtocolErrorKind, ProtocolResult};
@@ -16,6 +17,7 @@ impl ServiceMapping for DefaultServiceMapping {
         let service = match name {
             "riscv" => Box::new(RiscvService::init(sdk)?) as Box<dyn Service>,
             "asset" => Box::new(AssetService::new(sdk)?) as Box<dyn Service>,
+            "metadata" => Box::new(MetadataService::new(sdk)?) as Box<dyn Service>,
             _ => {
                 return Err(MappingError::NotFoundService {
                     service: name.to_owned(),
@@ -28,7 +30,7 @@ impl ServiceMapping for DefaultServiceMapping {
     }
 
     fn list_service_name(&self) -> Vec<String> {
-        vec!["asset".to_owned(), "riscv".to_owned()]
+        vec!["asset".to_owned(), "metadata".to_owned(), "riscv".to_owned()]
     }
 }
 

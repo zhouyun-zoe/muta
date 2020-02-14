@@ -9,13 +9,15 @@ use derive_more::Display;
 use protocol::{types::Address, Bytes};
 use serde_derive::{Deserialize, Serialize};
 use tentacle::{
+    context::SessionContext,
     multiaddr::Multiaddr,
     secio::{PeerId, PublicKey},
 };
 
 use crate::common::ConnectedAddr;
 
-pub const BACKOFF_BASE: usize = 5;
+pub const BACKOFF_BASE: usize = 2;
+pub const MAX_RETRY_INTERVAL: u64 = 512; // seconds
 pub const VALID_ATTEMPT_INTERVAL: u64 = 4;
 
 // TODO: display next_retry
@@ -30,6 +32,10 @@ pub const VALID_ATTEMPT_INTERVAL: u64 = 4;
 pub(super) struct PeerState {
     // Current connection address
     connected_addr: Option<ConnectedAddr>,
+
+    // Session for debug write pending data size
+    #[serde(skip)]
+    session: Option<SessionContext>,
 
     // Peer address set (Multiple format, p2p, quic etc)
     addr_set: HashSet<Multiaddr>,
@@ -72,6 +78,7 @@ impl PeerState {
     pub fn new() -> Self {
         PeerState {
             connected_addr: None,
+            session:        None,
             addr_set:       Default::default(),
             retry_count:    0,
             next_retry:     Instant::now(),
@@ -130,6 +137,15 @@ impl Peer {
         self.state.connected_addr.clone()
     }
 
+    // Pending data size in write buffer
+    pub fn pending_data_size(&self) -> usize {
+        if let Some(ref session) = self.state.session {
+            session.pending_data_size()
+        } else {
+            0
+        }
+    }
+
     pub fn user_addr(&self) -> &Address {
         &self.user_addr
     }
@@ -156,6 +172,10 @@ impl Peer {
 
     pub fn set_connected_addr(&mut self, addr: Option<ConnectedAddr>) {
         self.state.connected_addr = addr;
+    }
+
+    pub fn set_session(&mut self, session: SessionContext) {
+        self.state.session = Some(session);
     }
 
     pub fn add_addr(&mut self, addr: Multiaddr) {
@@ -204,7 +224,10 @@ impl Peer {
         self.state.retry_count += 1;
         self.state.attempt_at = duration_since(SystemTime::now(), UNIX_EPOCH).as_secs();
 
-        let secs = BACKOFF_BASE.pow(self.state.retry_count) as u64;
+        let mut secs = BACKOFF_BASE.pow(self.state.retry_count) as u64;
+        if secs > MAX_RETRY_INTERVAL {
+            secs = MAX_RETRY_INTERVAL;
+        }
         self.state.next_retry = Instant::now() + Duration::from_secs(secs);
     }
 

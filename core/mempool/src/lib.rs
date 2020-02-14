@@ -107,7 +107,11 @@ where
 
     async fn package(&self, ctx: Context, cycle_limit: u64) -> ProtocolResult<MixedTxHashes> {
         let current_height = self.adapter.get_latest_height(ctx.clone()).await?;
-
+        log::info!(
+            "[mempool]: {:?} txs in map and {:?} txs in queue while package",
+            self.tx_cache.len(),
+            self.tx_cache.queue_len(),
+        );
         self.tx_cache.package(
             cycle_limit,
             current_height,
@@ -116,6 +120,10 @@ where
     }
 
     async fn flush(&self, _ctx: Context, tx_hashes: Vec<Hash>) -> ProtocolResult<()> {
+        log::info!(
+            "[mempool]: flush mempool with {:?} tx_hashes",
+            tx_hashes.len(),
+        );
         self.tx_cache.flush(&tx_hashes);
         self.callback_cache.clear();
         Ok(())
@@ -181,11 +189,12 @@ where
         let unknown_hashes = self.show_unknown_txs(propose_tx_hashes);
         if !unknown_hashes.is_empty() {
             let txs = self.adapter.pull_txs(ctx.clone(), unknown_hashes).await?;
-            txs.into_iter().for_each(|tx| {
-                // Should not handle error here, it is normal that transactions response here
-                // are exist in pool.
-                let _ = self.tx_cache.insert_propose_tx(tx);
-            });
+            // TODO: concurrently insert
+            for tx in txs.into_iter() {
+                // Should not handle error here, it is normal that transactions
+                // response here are exist in pool.
+                let _ = self.insert(ctx.clone(), tx).await;
+            }
         }
         Ok(())
     }
@@ -233,9 +242,6 @@ pub enum MemPoolError {
 
     #[display(fmt = "Tx: {:?} invalid timeout", tx_hash)]
     InvalidTimeout { tx_hash: Hash },
-
-    #[display(fmt = "Batch insert error")]
-    BatchInsertErr,
 }
 
 impl Error for MemPoolError {}

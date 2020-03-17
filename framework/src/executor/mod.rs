@@ -249,9 +249,9 @@ impl<S: 'static + Storage, DB: 'static + TrieDB, Mapping: 'static + ServiceMappi
         // TODO: If the tx fails, status tx_hook_after_ changes will also be reverted.
         // It may not be what the developer want.
         // Need a new mechanism for this.
-        for tx_hook_service in tx_hook_services.iter_mut() {
-            tx_hook_service.tx_hook_after_(context.clone())?;
-        }
+        // for tx_hook_service in tx_hook_services.iter_mut() {
+        //     tx_hook_service.tx_hook_after_(context.clone())?;
+        // }
         original_res
     }
 

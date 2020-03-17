@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use futures::lock::Mutex;
@@ -285,7 +285,7 @@ impl<Adapter: SynchronizationAdapter> OverlordSynchronization<Adapter> {
         let current_status = status_agent.to_inner();
         let cycles_limit = current_status.cycles_limit;
 
-        let now = std::time::Instant();
+        let now = Instant::now();
         let exec_params = ExecutorParams {
             state_root: current_status.get_latest_state_root(),
             height: rich_block.block.header.height,

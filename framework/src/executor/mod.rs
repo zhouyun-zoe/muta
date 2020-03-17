@@ -321,7 +321,7 @@ impl<S: 'static + Storage, DB: 'static + TrieDB, Mapping: 'static + ServiceMappi
                 let exec_resp = self.catch_call(context.clone(), ExecType::Write);
                 let now = now.elapsed();
                 if now.as_millis() > 2000 {
-                    log::info!("exec_resp {:?}", exec_resp);
+                    log::info!("exec_resp {:?} tx {:?}", exec_resp, stx);
                 }
                 if exec_resp.is_error {
                     self.revert_cache()?;

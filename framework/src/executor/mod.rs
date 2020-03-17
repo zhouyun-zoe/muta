@@ -303,6 +303,7 @@ impl<S: 'static + Storage, DB: 'static + TrieDB, Mapping: 'static + ServiceMappi
         self.hook(HookType::Before, params)?;
 
         let now = std::time::Instant::now();
+        log::info!("txs {:?}", txs);
         let mut receipts = txs
             .iter()
             .map(|stx| {
@@ -323,12 +324,15 @@ impl<S: 'static + Storage, DB: 'static + TrieDB, Mapping: 'static + ServiceMappi
                 if now.as_millis() > 2000 {
                     log::info!("exec_resp {:?} tx {:?}", exec_resp, stx);
                 }
+                let now = std::time::Instant::now();
                 if exec_resp.is_error {
                     self.revert_cache()?;
                 } else {
                     self.stash()?;
                 };
-
+                if now.as_millis() > 2000 {
+                    log::info!("revert_cache {:?} tx {:?}", exec_resp, stx);
+                }
                 Ok(Receipt {
                     state_root:  MerkleRoot::from_empty(),
                     height:      context.get_current_height(),

@@ -320,19 +320,16 @@ impl<S: 'static + Storage, DB: 'static + TrieDB, Mapping: 'static + ServiceMappi
 
                 let now = std::time::Instant::now();
                 let exec_resp = self.catch_call(context.clone(), ExecType::Write);
-                let now = now.elapsed();
-                if now.as_millis() > 2000 {
-                    log::info!("exec_resp {:?} tx {:?}", exec_resp, stx);
-                }
-                let now = std::time::Instant::now();
+                log::info!("exec tx {:?}", now.elapsed());
+
                 if exec_resp.is_error {
+                    let now = std::time::Instant::now();
                     self.revert_cache()?;
+                    log::info!("exec revert_cache {:?}", now.elapsed());
                 } else {
                     self.stash()?;
                 };
-                if now.as_millis() > 2000 {
-                    log::info!("revert_cache {:?} tx {:?}", exec_resp, stx);
-                }
+
                 Ok(Receipt {
                     state_root:  MerkleRoot::from_empty(),
                     height:      context.get_current_height(),

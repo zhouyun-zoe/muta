@@ -299,6 +299,7 @@ impl<Adapter: SynchronizationAdapter> OverlordSynchronization<Adapter> {
             now.elapsed(),
             rich_block.txs.len()
         );
+        log::info("resp receipts {:?}", resp.receipts);
         status_agent.update_by_executed(ExecutedInfo::new(
             rich_block.block.header.height,
             rich_block.block.header.order_root,

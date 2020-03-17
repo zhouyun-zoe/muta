@@ -245,9 +245,7 @@ impl<S: 'static + Storage, DB: 'static + TrieDB, Mapping: 'static + ServiceMappi
         for tx_hook_service in tx_hook_services.iter_mut() {
             tx_hook_service.tx_hook_before_(context.clone())?;
         }
-        let now = std::time::Instant::now();
         let original_res = self.call(context.clone(), exec_type);
-        log::info!("exec one tx {:?}", now.elapsed());
         // TODO: If the tx fails, status tx_hook_after_ changes will also be reverted.
         // It may not be what the developer want.
         // Need a new mechanism for this.
@@ -304,6 +302,7 @@ impl<S: 'static + Storage, DB: 'static + TrieDB, Mapping: 'static + ServiceMappi
     ) -> ProtocolResult<ExecutorResp> {
         self.hook(HookType::Before, params)?;
 
+        let now = std::time::Instant::now();
         let mut receipts = txs
             .iter()
             .map(|stx| {
@@ -341,10 +340,12 @@ impl<S: 'static + Storage, DB: 'static + TrieDB, Mapping: 'static + ServiceMappi
                 })
             })
             .collect::<Result<Vec<Receipt>, ProtocolError>>()?;
-
+        log::info!("exec txs {:?} len {:?}", now.elapsed(), txs.len());
         self.hook(HookType::After, params)?;
 
+        let now = std::time::Instant::now();
         let state_root = self.commit()?;
+        log::info!("commit state {:?} len {:?}", now.elapsed(), txs.len());
         let mut all_cycles_used = 0;
 
         for receipt in receipts.iter_mut() {

@@ -350,10 +350,19 @@ pub async fn start<Mapping: 'static + ServiceMapping>(
     // lost current status.
     log::info!("Re-execute from {} to {}", exec_height + 1, current_height);
     for height in exec_height + 1..=current_height {
+        let now = std::time::Instant();
         let block = storage.get_block_by_height(height).await?;
+        log::info!("get block {:?}", now.elapsed());
+
+        let now = std::time::Instant();
         let txs = storage
             .get_transactions(block.ordered_tx_hashes.clone())
             .await?;
+        log::info!(
+            "get_transactions {:?} txs len {:?}",
+            now.elapsed(),
+            txs.len()
+        );
         let rich_block = RichBlock { block, txs };
         let _ = synchronization
             .exec_block(Context::new(), rich_block, status_agent.clone())

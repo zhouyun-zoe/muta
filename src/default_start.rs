@@ -346,6 +346,29 @@ pub async fn start<Mapping: 'static + ServiceMapping>(
         lock,
     ));
 
+    // Init graphql
+    let mut graphql_config = GraphQLConfig::default();
+    graphql_config.listening_address = config.graphql.listening_address;
+    graphql_config.graphql_uri = config.graphql.graphql_uri.clone();
+    graphql_config.graphiql_uri = config.graphql.graphiql_uri.clone();
+    if config.graphql.workers != 0 {
+        graphql_config.workers = config.graphql.workers;
+    }
+    if config.graphql.maxconn != 0 {
+        graphql_config.maxconn = config.graphql.maxconn;
+    }
+    if config.graphql.max_payload_size != 0 {
+        graphql_config.max_payload_size = config.graphql.max_payload_size;
+    }
+
+    tokio::task::spawn_local(async move {
+        let local = tokio::task::LocalSet::new();
+        let actix_rt = actix_rt::System::run_in_tokio("muta-graphql", &local);
+        tokio::task::spawn_local(actix_rt);
+
+        core_api::start_graphql(graphql_config, api_adapter).await;
+    });
+
     // Re-execute block from exec_height + 1 to current_height, so that init the
     // lost current status.
     log::info!("Re-execute from {} to {}", exec_height + 1, current_height);
@@ -447,29 +470,6 @@ pub async fn start<Mapping: 'static + ServiceMapping>(
 
     let (abortable_demon, abort_handle) = future::abortable(exec_demon.run());
     tokio::task::spawn_local(abortable_demon);
-
-    // Init graphql
-    let mut graphql_config = GraphQLConfig::default();
-    graphql_config.listening_address = config.graphql.listening_address;
-    graphql_config.graphql_uri = config.graphql.graphql_uri.clone();
-    graphql_config.graphiql_uri = config.graphql.graphiql_uri.clone();
-    if config.graphql.workers != 0 {
-        graphql_config.workers = config.graphql.workers;
-    }
-    if config.graphql.maxconn != 0 {
-        graphql_config.maxconn = config.graphql.maxconn;
-    }
-    if config.graphql.max_payload_size != 0 {
-        graphql_config.max_payload_size = config.graphql.max_payload_size;
-    }
-
-    tokio::task::spawn_local(async move {
-        let local = tokio::task::LocalSet::new();
-        let actix_rt = actix_rt::System::run_in_tokio("muta-graphql", &local);
-        tokio::task::spawn_local(actix_rt);
-
-        core_api::start_graphql(graphql_config, api_adapter).await;
-    });
 
     #[cfg(windows)]
     let _ = tokio::signal::ctrl_c().await;

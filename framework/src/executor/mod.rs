@@ -317,8 +317,12 @@ impl<S: 'static + Storage, DB: 'static + TrieDB, Mapping: 'static + ServiceMappi
                     &stx.raw.request,
                 )?;
 
+                let now = std::time::Instant::now();
                 let exec_resp = self.catch_call(context.clone(), ExecType::Write);
-
+                let now = now.elapsed();
+                if now.as_millis() > 2000 {
+                    log::info!("exec_resp {:?}", exec_resp);
+                }
                 if exec_resp.is_error {
                     self.revert_cache()?;
                 } else {

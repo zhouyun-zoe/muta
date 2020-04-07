@@ -11,7 +11,6 @@ mod storage;
 
 use rand::random;
 
-use protocol::traits::ServiceResponse;
 use protocol::types::{
     Address, Block, BlockHeader, Hash, Proof, RawTransaction, Receipt, ReceiptResponse,
     SignedTransaction, TransactionRequest,
@@ -50,11 +49,8 @@ fn mock_receipt(tx_hash: Hash) -> Receipt {
     let response = ReceiptResponse {
         service_name: "test".to_owned(),
         method:       "test".to_owned(),
-        response:     ServiceResponse::<String> {
-            code:          0,
-            succeed_data:  "ok".to_owned(),
-            error_message: "".to_owned(),
-        },
+        ret:          "test".to_owned(),
+        is_error:     false,
     };
     Receipt {
         state_root: nonce,

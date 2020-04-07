@@ -1,4 +1,19 @@
-use syn::{FnArg, Pat, Path, Type};
+use syn::{FnArg, Pat, Path, PathArguments, Type};
+
+// expect fn foo() -> ProtocolResult<T>
+pub fn get_protocol_result_args(path: &Path) -> Option<&PathArguments> {
+    // ::<a>::<b>
+    if path.leading_colon.is_some() {
+        return None;
+    }
+
+    // ProtocolResult<T>
+    if path.segments.len() == 1 && path.segments[0].ident == "ProtocolResult" {
+        return Some(&path.segments[0].arguments);
+    }
+
+    None
+}
 
 pub fn get_request_context_pat(bound_name: &str, fn_arg: &FnArg) -> Option<Pat> {
     if let FnArg::Typed(pat_type) = &*fn_arg {

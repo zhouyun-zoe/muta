@@ -6,7 +6,6 @@ use prost::Message;
 use crate::{
     codec::{primitive::Hash, CodecError, ProtocolCodecSync},
     field, impl_default_bytes_codec_for,
-    traits::ServiceResponse,
     types::primitive as protocol_primitive,
     types::receipt as protocol_receipt,
     ProtocolError, ProtocolResult,
@@ -45,14 +44,11 @@ pub struct ReceiptResponse {
     #[prost(bytes, tag = "2")]
     pub method: Vec<u8>,
 
-    #[prost(uint64, tag = "3")]
-    pub code: u64,
+    #[prost(bytes, tag = "3")]
+    pub ret: Vec<u8>,
 
-    #[prost(bytes, tag = "4")]
-    pub succeed_data: Vec<u8>,
-
-    #[prost(bytes, tag = "5")]
-    pub error_message: Vec<u8>,
+    #[prost(bool, tag = "4")]
+    pub is_error: bool,
 }
 
 #[derive(Clone, Message)]
@@ -73,11 +69,10 @@ pub struct Event {
 impl From<receipt::ReceiptResponse> for ReceiptResponse {
     fn from(response: receipt::ReceiptResponse) -> ReceiptResponse {
         ReceiptResponse {
-            service_name:  response.service_name.as_bytes().to_vec(),
-            method:        response.method.as_bytes().to_vec(),
-            code:          response.response.code,
-            succeed_data:  response.response.succeed_data.as_bytes().to_vec(),
-            error_message: response.response.error_message.as_bytes().to_vec(),
+            service_name: response.service_name.as_bytes().to_vec(),
+            method:       response.method.as_bytes().to_vec(),
+            ret:          response.ret.as_bytes().to_vec(),
+            is_error:     response.is_error,
         }
     }
 }
@@ -90,13 +85,8 @@ impl TryFrom<ReceiptResponse> for receipt::ReceiptResponse {
             service_name: String::from_utf8(response.service_name)
                 .map_err(CodecError::FromStringUtf8)?,
             method:       String::from_utf8(response.method).map_err(CodecError::FromStringUtf8)?,
-            response:     ServiceResponse {
-                code:          response.code,
-                succeed_data:  String::from_utf8(response.succeed_data)
-                    .map_err(CodecError::FromStringUtf8)?,
-                error_message: String::from_utf8(response.error_message)
-                    .map_err(CodecError::FromStringUtf8)?,
-            },
+            ret:          String::from_utf8(response.ret).map_err(CodecError::FromStringUtf8)?,
+            is_error:     response.is_error,
         })
     }
 }

@@ -3,7 +3,6 @@
 extern crate binding_macro;
 
 use std::cell::RefCell;
-use std::panic::{self, AssertUnwindSafe};
 use std::rc::Rc;
 
 use bytes::Bytes;
@@ -11,12 +10,12 @@ use serde::{Deserialize, Serialize};
 
 use protocol::fixed_codec::FixedCodec;
 use protocol::traits::{
-    ExecutorParams, Service, ServiceResponse, ServiceSDK, StoreArray, StoreBool, StoreMap,
-    StoreString, StoreUint64,
+    ExecutorParams, Service, ServiceSDK, StoreArray, StoreBool, StoreMap, StoreString, StoreUint64,
 };
 use protocol::types::{
     Address, Block, Hash, Receipt, ServiceContext, ServiceContextParams, SignedTransaction,
 };
+use protocol::ProtocolResult;
 
 #[test]
 fn test_read_and_write() {
@@ -24,13 +23,13 @@ fn test_read_and_write() {
 
     impl Tests {
         #[read]
-        fn test_read_fn(&self, _ctx: ServiceContext, _s: &str) -> ServiceResponse<String> {
-            ServiceResponse::<String>::from_succeed("read".to_owned())
+        fn test_read_fn(&self, _ctx: ServiceContext, _s: &str) -> ProtocolResult<String> {
+            Ok("read".to_owned())
         }
 
         #[write]
-        fn test_write_fn(&mut self, _ctx: ServiceContext, _s: &str) -> ServiceResponse<String> {
-            ServiceResponse::<String>::from_succeed("write".to_owned())
+        fn test_write_fn(&mut self, _ctx: ServiceContext, _s: &str) -> ProtocolResult<String> {
+            Ok("write".to_owned())
         }
     }
 
@@ -38,11 +37,11 @@ fn test_read_and_write() {
 
     let mut t = Tests {};
     assert_eq!(
-        t.test_read_fn(context.clone(), "read").succeed_data,
+        t.test_read_fn(context.clone(), "read").unwrap(),
         "read".to_owned()
     );
     assert_eq!(
-        t.test_write_fn(context, "write").succeed_data,
+        t.test_write_fn(context, "write").unwrap(),
         "write".to_owned()
     );
 }
@@ -55,22 +54,22 @@ fn test_hooks() {
 
     impl Tests {
         #[hook_after]
-        fn hook_after(&mut self, params: &ExecutorParams) -> ServiceResponse<()> {
+        fn hook_after(&mut self, params: &ExecutorParams) -> ProtocolResult<()> {
             self.height = params.height;
-            ServiceResponse::<()>::from_succeed(())
+            Ok(())
         }
 
         #[hook_before]
-        fn hook_before(&mut self, params: &ExecutorParams) -> ServiceResponse<()> {
+        fn hook_before(&mut self, params: &ExecutorParams) -> ProtocolResult<()> {
             self.height = params.height;
-            ServiceResponse::<()>::from_succeed(())
+            Ok(())
         }
     }
 
     let mut t = Tests { height: 0 };
-    t.hook_after(&mock_executor_params());
+    t.hook_after(&mock_executor_params()).unwrap();
     assert_eq!(t.height, 9);
-    t.hook_before(&mock_executor_params());
+    t.hook_before(&mock_executor_params()).unwrap();
     assert_eq!(t.height, 9);
 }
 
@@ -80,21 +79,21 @@ fn test_read_and_write_with_noneparams() {
 
     impl Tests {
         #[read]
-        fn test_read_fn(&self, _ctx: ServiceContext) -> ServiceResponse<()> {
-            ServiceResponse::<()>::from_succeed(())
+        fn test_read_fn(&self, _ctx: ServiceContext) -> ProtocolResult<()> {
+            Ok(())
         }
 
         #[write]
-        fn test_write_fn(&mut self, _ctx: ServiceContext) -> ServiceResponse<()> {
-            ServiceResponse::<()>::from_succeed(())
+        fn test_write_fn(&mut self, _ctx: ServiceContext) -> ProtocolResult<()> {
+            Ok(())
         }
     }
 
     let context = get_context(1000, "", "", "");
 
     let mut t = Tests {};
-    assert_eq!(t.test_read_fn(context.clone()).succeed_data, ());
-    assert_eq!(t.test_write_fn(context).succeed_data, ());
+    assert_eq!(t.test_read_fn(context.clone()).unwrap(), ());
+    assert_eq!(t.test_write_fn(context).unwrap(), ());
 }
 
 #[test]
@@ -103,38 +102,38 @@ fn test_cycles() {
 
     impl Tests {
         #[cycles(100)]
-        fn test_cycles(&self, ctx: ServiceContext) -> ServiceResponse<()> {
-            ServiceResponse::<()>::from_succeed(())
+        fn test_cycles(&self, ctx: ServiceContext) -> ProtocolResult<()> {
+            Ok(())
         }
 
         #[cycles(500)]
-        fn test_cycles2(&self, ctx: ServiceContext) -> ServiceResponse<()> {
-            ServiceResponse::<()>::from_succeed(())
+        fn test_cycles2(&self, ctx: ServiceContext) -> ProtocolResult<()> {
+            Ok(())
         }
     }
 
     #[cycles(200)]
-    fn test_sub_cycles_fn1(ctx: ServiceContext) -> ServiceResponse<()> {
-        ServiceResponse::<()>::from_succeed(())
+    fn test_sub_cycles_fn1(ctx: ServiceContext) -> ProtocolResult<()> {
+        Ok(())
     }
 
     #[cycles(200)]
-    fn test_sub_cycles_fn2(_foo: u64, ctx: ServiceContext) -> ServiceResponse<()> {
-        ServiceResponse::<()>::from_succeed(())
+    fn test_sub_cycles_fn2(_foo: u64, ctx: ServiceContext) -> ProtocolResult<()> {
+        Ok(())
     }
 
     let t = Tests {};
     let context = get_context(1000, "", "", "");
-    t.test_cycles(context.clone());
+    t.test_cycles(context.clone()).unwrap();
     assert_eq!(context.get_cycles_used(), 100);
 
-    t.test_cycles2(context.clone());
+    t.test_cycles2(context.clone()).unwrap();
     assert_eq!(context.get_cycles_used(), 600);
 
-    test_sub_cycles_fn1(context.clone());
+    test_sub_cycles_fn1(context.clone()).unwrap();
     assert_eq!(context.get_cycles_used(), 800);
 
-    test_sub_cycles_fn2(1, context.clone());
+    test_sub_cycles_fn2(1, context.clone()).unwrap();
     assert_eq!(context.get_cycles_used(), 1000);
 }
 
@@ -146,7 +145,7 @@ fn test_service() {
         age:  u64,
         sex:  bool,
     }
-    #[derive(Serialize, Deserialize, Debug, Default)]
+    #[derive(Serialize, Deserialize, Debug)]
     struct TestServiceResponse {
         pub message: String,
     }
@@ -161,18 +160,22 @@ fn test_service() {
     #[service]
     impl<SDK: ServiceSDK> Tests<SDK> {
         #[genesis]
-        fn init_genesis(&mut self) {
+        fn init_genesis(&mut self) -> ProtocolResult<()> {
             self.genesis_data = "genesis".to_owned();
+
+            Ok(())
         }
 
         #[hook_before]
-        fn custom_hook_before(&mut self, _params: &ExecutorParams) {
+        fn custom_hook_before(&mut self, _params: &ExecutorParams) -> ProtocolResult<()> {
             self.hook_before = true;
+            Ok(())
         }
 
         #[hook_after]
-        fn custom_hook_after(&mut self, _params: &ExecutorParams) {
+        fn custom_hook_after(&mut self, _params: &ExecutorParams) -> ProtocolResult<()> {
             self.hook_after = true;
+            Ok(())
         }
 
         #[read]
@@ -180,12 +183,10 @@ fn test_service() {
             &self,
             _ctx: ServiceContext,
             _payload: TestServicePayload,
-        ) -> ServiceResponse<TestServiceResponse> {
-            let res = TestServiceResponse {
+        ) -> ProtocolResult<TestServiceResponse> {
+            Ok(TestServiceResponse {
                 message: "read ok".to_owned(),
-            };
-
-            ServiceResponse::<TestServiceResponse>::from_succeed(res)
+            })
         }
 
         #[write]
@@ -193,12 +194,10 @@ fn test_service() {
             &mut self,
             _ctx: ServiceContext,
             _payload: TestServicePayload,
-        ) -> ServiceResponse<TestServiceResponse> {
-            let res = TestServiceResponse {
+        ) -> ProtocolResult<TestServiceResponse> {
+            Ok(TestServiceResponse {
                 message: "write ok".to_owned(),
-            };
-
-            ServiceResponse::<TestServiceResponse>::from_succeed(res)
+            })
         }
     }
 
@@ -217,33 +216,33 @@ fn test_service() {
         hook_before:  false,
     };
 
-    test_service.genesis_("".to_owned());
+    test_service.genesis_("".to_owned()).unwrap();
     assert_eq!(test_service.genesis_data, "genesis");
 
     let context = get_context(1024 * 1024, "", "test_write", &payload_str);
-    let write_res = test_service.write_(context).succeed_data;
+    let write_res = test_service.write_(context).unwrap();
     assert_eq!(write_res, r#"{"message":"write ok"}"#);
 
     let context = get_context(1024 * 1024, "", "test_read", &payload_str);
-    let read_res = test_service.read_(context).succeed_data;
+    let read_res = test_service.read_(context).unwrap();
     assert_eq!(read_res, r#"{"message":"read ok"}"#);
 
     let context = get_context(1024 * 1024, "", "test_notfound", &payload_str);
-    let read_res = panic::catch_unwind(AssertUnwindSafe(|| test_service.read_(context.clone())));
-    assert_eq!(read_res.unwrap().is_error(), true);
-    let write_res = panic::catch_unwind(AssertUnwindSafe(|| test_service.write_(context)));
-    assert_eq!(write_res.unwrap().is_error(), true);
+    let read_res = test_service.read_(context.clone());
+    assert_eq!(read_res.is_err(), true);
+    let write_res = test_service.write_(context);
+    assert_eq!(write_res.is_err(), true);
 
-    test_service.hook_before_(&mock_executor_params());
+    test_service.hook_before_(&mock_executor_params()).unwrap();
     assert_eq!(test_service.hook_before, true);
 
-    test_service.hook_after_(&mock_executor_params());
+    test_service.hook_after_(&mock_executor_params()).unwrap();
     assert_eq!(test_service.hook_after, true);
 }
 
 #[test]
 fn test_service_none_payload() {
-    #[derive(Serialize, Deserialize, Debug, Default)]
+    #[derive(Serialize, Deserialize, Debug)]
     struct TestServiceResponse {
         pub message: String,
     }
@@ -258,36 +257,36 @@ fn test_service_none_payload() {
     #[service]
     impl<SDK: ServiceSDK> Tests<SDK> {
         #[genesis]
-        fn init_genesis(&mut self) {
+        fn init_genesis(&mut self) -> ProtocolResult<()> {
             self.genesis_data = "genesis".to_owned();
+
+            Ok(())
         }
 
         #[hook_before]
-        fn custom_hook_before(&mut self, _params: &ExecutorParams) {
+        fn custom_hook_before(&mut self, _params: &ExecutorParams) -> ProtocolResult<()> {
             self.hook_before = true;
+            Ok(())
         }
 
         #[hook_after]
-        fn custom_hook_after(&mut self, _params: &ExecutorParams) {
+        fn custom_hook_after(&mut self, _params: &ExecutorParams) -> ProtocolResult<()> {
             self.hook_after = true;
+            Ok(())
         }
 
         #[read]
-        fn test_read(&self, _ctx: ServiceContext) -> ServiceResponse<TestServiceResponse> {
-            let res = TestServiceResponse {
+        fn test_read(&self, _ctx: ServiceContext) -> ProtocolResult<TestServiceResponse> {
+            Ok(TestServiceResponse {
                 message: "read ok".to_owned(),
-            };
-
-            ServiceResponse::<TestServiceResponse>::from_succeed(res)
+            })
         }
 
         #[write]
-        fn test_write(&mut self, _ctx: ServiceContext) -> ServiceResponse<TestServiceResponse> {
-            let res = TestServiceResponse {
+        fn test_write(&mut self, _ctx: ServiceContext) -> ProtocolResult<TestServiceResponse> {
+            Ok(TestServiceResponse {
                 message: "write ok".to_owned(),
-            };
-
-            ServiceResponse::<TestServiceResponse>::from_succeed(res)
+            })
         }
     }
 
@@ -299,27 +298,27 @@ fn test_service_none_payload() {
         hook_before:  false,
     };
 
-    test_service.genesis_("".to_owned());
+    test_service.genesis_("".to_owned()).unwrap();
     assert_eq!(test_service.genesis_data, "genesis");
 
     let context = get_context(1024 * 1024, "", "test_write", "");
-    let write_res = test_service.write_(context).succeed_data;
+    let write_res = test_service.write_(context).unwrap();
     assert_eq!(write_res, r#"{"message":"write ok"}"#);
 
     let context = get_context(1024 * 1024, "", "test_read", "");
-    let read_res = test_service.read_(context).succeed_data;
+    let read_res = test_service.read_(context).unwrap();
     assert_eq!(read_res, r#"{"message":"read ok"}"#);
 
     let context = get_context(1024 * 1024, "", "test_notfound", "");
-    let read_res = panic::catch_unwind(AssertUnwindSafe(|| test_service.read_(context.clone())));
-    assert_eq!(read_res.unwrap().is_error(), true);
-    let write_res = panic::catch_unwind(AssertUnwindSafe(|| test_service.write_(context)));
-    assert_eq!(write_res.unwrap().is_error(), true);
+    let read_res = test_service.read_(context.clone());
+    assert_eq!(read_res.is_err(), true);
+    let write_res = test_service.write_(context);
+    assert_eq!(write_res.is_err(), true);
 
-    test_service.hook_before_(&mock_executor_params());
+    test_service.hook_before_(&mock_executor_params()).unwrap();
     assert_eq!(test_service.hook_before, true);
 
-    test_service.hook_after_(&mock_executor_params());
+    test_service.hook_after_(&mock_executor_params()).unwrap();
     assert_eq!(test_service.hook_after, true);
 }
 
@@ -335,28 +334,32 @@ fn test_service_none_response() {
     #[service]
     impl<SDK: ServiceSDK> Tests<SDK> {
         #[genesis]
-        fn init_genesis(&mut self) {
+        fn init_genesis(&mut self) -> ProtocolResult<()> {
             self.genesis_data = "genesis".to_owned();
+
+            Ok(())
         }
 
         #[hook_before]
-        fn custom_hook_before(&mut self, _params: &ExecutorParams) {
+        fn custom_hook_before(&mut self, _params: &ExecutorParams) -> ProtocolResult<()> {
             self.hook_before = true;
+            Ok(())
         }
 
         #[hook_after]
-        fn custom_hook_after(&mut self, _params: &ExecutorParams) {
+        fn custom_hook_after(&mut self, _params: &ExecutorParams) -> ProtocolResult<()> {
             self.hook_after = true;
+            Ok(())
         }
 
         #[read]
-        fn test_read(&self, _ctx: ServiceContext) -> ServiceResponse<()> {
-            ServiceResponse::<()>::from_succeed(())
+        fn test_read(&self, _ctx: ServiceContext) -> ProtocolResult<()> {
+            Ok(())
         }
 
         #[write]
-        fn test_write(&mut self, _ctx: ServiceContext) -> ServiceResponse<()> {
-            ServiceResponse::<()>::from_succeed(())
+        fn test_write(&mut self, _ctx: ServiceContext) -> ProtocolResult<()> {
+            Ok(())
         }
     }
 
@@ -368,27 +371,27 @@ fn test_service_none_response() {
         hook_before:  false,
     };
 
-    test_service.genesis_("".to_owned());
+    test_service.genesis_("".to_owned()).unwrap();
     assert_eq!(test_service.genesis_data, "genesis");
 
     let context = get_context(1024 * 1024, "", "test_write", "");
-    let write_res = test_service.write_(context).succeed_data;
+    let write_res = test_service.write_(context).unwrap();
     assert_eq!(write_res, "");
 
     let context = get_context(1024 * 1024, "", "test_read", "");
-    let read_res = test_service.read_(context).succeed_data;
+    let read_res = test_service.read_(context).unwrap();
     assert_eq!(read_res, "");
 
     let context = get_context(1024 * 1024, "", "test_notfound", "");
-    let read_res = panic::catch_unwind(AssertUnwindSafe(|| test_service.read_(context.clone())));
-    assert_eq!(read_res.unwrap().is_error(), true);
-    let write_res = panic::catch_unwind(AssertUnwindSafe(|| test_service.write_(context)));
-    assert_eq!(write_res.unwrap().is_error(), true);
+    let read_res = test_service.read_(context.clone());
+    assert_eq!(read_res.is_err(), true);
+    let write_res = test_service.write_(context);
+    assert_eq!(write_res.is_err(), true);
 
-    test_service.hook_before_(&mock_executor_params());
+    test_service.hook_before_(&mock_executor_params()).unwrap();
     assert_eq!(test_service.hook_before, true);
 
-    test_service.hook_after_(&mock_executor_params());
+    test_service.hook_after_(&mock_executor_params()).unwrap();
     assert_eq!(test_service.hook_after, true);
 }
 
@@ -428,7 +431,7 @@ impl ServiceSDK for MockServiceSDK {
     fn alloc_or_recover_map<Key: 'static + FixedCodec + PartialEq, Val: 'static + FixedCodec>(
         &mut self,
         _var_name: &str,
-    ) -> Box<dyn StoreMap<Key, Val>> {
+    ) -> ProtocolResult<Box<dyn StoreMap<Key, Val>>> {
         unimplemented!()
     }
 
@@ -436,32 +439,39 @@ impl ServiceSDK for MockServiceSDK {
     fn alloc_or_recover_array<Elm: 'static + FixedCodec>(
         &mut self,
         _var_name: &str,
-    ) -> Box<dyn StoreArray<Elm>> {
+    ) -> ProtocolResult<Box<dyn StoreArray<Elm>>> {
         unimplemented!()
     }
 
     // Alloc or recover a `Uint64` by` var_name`
-    fn alloc_or_recover_uint64(&mut self, _var_name: &str) -> Box<dyn StoreUint64> {
+    fn alloc_or_recover_uint64(&mut self, _var_name: &str) -> ProtocolResult<Box<dyn StoreUint64>> {
         unimplemented!()
     }
 
     // Alloc or recover a `String` by` var_name`
-    fn alloc_or_recover_string(&mut self, _var_name: &str) -> Box<dyn StoreString> {
+    fn alloc_or_recover_string(&mut self, _var_name: &str) -> ProtocolResult<Box<dyn StoreString>> {
         unimplemented!()
     }
 
     // Alloc or recover a `Bool` by` var_name`
-    fn alloc_or_recover_bool(&mut self, _var_name: &str) -> Box<dyn StoreBool> {
+    fn alloc_or_recover_bool(&mut self, _var_name: &str) -> ProtocolResult<Box<dyn StoreBool>> {
         unimplemented!()
     }
 
     // Get a value from the service state by key
-    fn get_value<Key: FixedCodec, Ret: FixedCodec>(&self, _key: &Key) -> Option<Ret> {
+    fn get_value<Key: FixedCodec, Ret: FixedCodec>(
+        &self,
+        _key: &Key,
+    ) -> ProtocolResult<Option<Ret>> {
         unimplemented!()
     }
 
     // Set a value to the service state by key
-    fn set_value<Key: FixedCodec, Val: FixedCodec>(&mut self, _key: Key, _val: Val) {
+    fn set_value<Key: FixedCodec, Val: FixedCodec>(
+        &mut self,
+        _key: Key,
+        _val: Val,
+    ) -> ProtocolResult<()> {
         unimplemented!()
     }
 
@@ -470,7 +480,7 @@ impl ServiceSDK for MockServiceSDK {
         &self,
         _address: &Address,
         _key: &Key,
-    ) -> Option<Ret> {
+    ) -> ProtocolResult<Option<Ret>> {
         unimplemented!()
     }
 
@@ -480,26 +490,29 @@ impl ServiceSDK for MockServiceSDK {
         _address: &Address,
         _key: Key,
         _val: Val,
-    ) {
+    ) -> ProtocolResult<()> {
         unimplemented!()
     }
 
     // Get a signed transaction by `tx_hash`
     // if not found on the chain, return None
-    fn get_transaction_by_hash(&self, _tx_hash: &Hash) -> Option<SignedTransaction> {
+    fn get_transaction_by_hash(
+        &self,
+        _tx_hash: &Hash,
+    ) -> ProtocolResult<Option<SignedTransaction>> {
         unimplemented!()
     }
 
     // Get a block by `height`
     // if not found on the chain, return None
     // When the parameter `height` is None, get the latest (executing)` block`
-    fn get_block_by_height(&self, _height: Option<u64>) -> Option<Block> {
+    fn get_block_by_height(&self, _height: Option<u64>) -> ProtocolResult<Option<Block>> {
         unimplemented!()
     }
 
     // Get a receipt by `tx_hash`
     // if not found on the chain, return None
-    fn get_receipt_by_hash(&self, _tx_hash: &Hash) -> Option<Receipt> {
+    fn get_receipt_by_hash(&self, _tx_hash: &Hash) -> ProtocolResult<Option<Receipt>> {
         unimplemented!()
     }
 
@@ -513,7 +526,7 @@ impl ServiceSDK for MockServiceSDK {
         _service: &str,
         _method: &str,
         _payload: &str,
-    ) -> ServiceResponse<String> {
+    ) -> ProtocolResult<String> {
         unimplemented!()
     }
 
@@ -526,7 +539,7 @@ impl ServiceSDK for MockServiceSDK {
         _service: &str,
         _method: &str,
         _payload: &str,
-    ) -> ServiceResponse<String> {
+    ) -> ProtocolResult<String> {
         unimplemented!()
     }
 }

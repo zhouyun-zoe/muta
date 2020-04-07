@@ -1,8 +1,10 @@
+use derive_more::{Display, From};
 use serde::{Deserialize, Serialize};
 
 use binding_macro::{cycles, service, tx_hook_after, tx_hook_before};
-use protocol::traits::{ExecutorParams, ServiceResponse, ServiceSDK};
+use protocol::traits::{ExecutorParams, ServiceSDK};
 use protocol::types::ServiceContext;
+use protocol::{ProtocolError, ProtocolErrorKind, ProtocolResult};
 
 pub struct TestService<SDK> {
     sdk: SDK,
@@ -13,7 +15,7 @@ pub struct TestReadPayload {
     pub key: String,
 }
 
-#[derive(Deserialize, Serialize, Clone, Debug, Default)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct TestReadResponse {
     pub value: String,
 }
@@ -25,13 +27,13 @@ pub struct TestWritePayload {
     pub extra: String,
 }
 
-#[derive(Deserialize, Serialize, Clone, Debug, Default)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct TestWriteResponse {}
 
 #[service]
 impl<SDK: ServiceSDK> TestService<SDK> {
-    pub fn new(sdk: SDK) -> Self {
-        Self { sdk }
+    pub fn new(sdk: SDK) -> ProtocolResult<Self> {
+        Ok(Self { sdk })
     }
 
     #[cycles(100_00)]
@@ -40,10 +42,9 @@ impl<SDK: ServiceSDK> TestService<SDK> {
         &self,
         ctx: ServiceContext,
         payload: TestReadPayload,
-    ) -> ServiceResponse<TestReadResponse> {
-        let value: String = self.sdk.get_value(&payload.key).unwrap_or_default();
-        let res = TestReadResponse { value };
-        ServiceResponse::<TestReadResponse>::from_succeed(res)
+    ) -> ProtocolResult<TestReadResponse> {
+        let value: String = self.sdk.get_value(&payload.key)?.unwrap_or_default();
+        Ok(TestReadResponse { value })
     }
 
     #[cycles(210_00)]
@@ -52,9 +53,9 @@ impl<SDK: ServiceSDK> TestService<SDK> {
         &mut self,
         ctx: ServiceContext,
         payload: TestWritePayload,
-    ) -> ServiceResponse<TestWriteResponse> {
-        self.sdk.set_value(payload.key, payload.value);
-        ServiceResponse::<TestWriteResponse>::from_succeed(TestWriteResponse {})
+    ) -> ProtocolResult<TestWriteResponse> {
+        self.sdk.set_value(payload.key, payload.value)?;
+        Ok(TestWriteResponse {})
     }
 
     #[cycles(210_00)]
@@ -63,28 +64,41 @@ impl<SDK: ServiceSDK> TestService<SDK> {
         &mut self,
         ctx: ServiceContext,
         payload: TestWritePayload,
-    ) -> ServiceResponse<TestWriteResponse> {
+    ) -> ProtocolResult<TestWriteResponse> {
         let payload_str = serde_json::to_string(&payload).unwrap();
         self.sdk
-            .write(&ctx, None, "test", "test_write", &payload_str);
-        ServiceResponse::<TestWriteResponse>::from_succeed(TestWriteResponse {})
+            .write(&ctx, None, "test", "test_write", &payload_str)?;
+        Ok(TestWriteResponse {})
     }
 
     #[tx_hook_before]
-    fn test_tx_hook_before(&mut self, ctx: ServiceContext) {
+    fn test_tx_hook_before(&mut self, ctx: ServiceContext) -> ProtocolResult<()> {
         if ctx.get_service_name() == "test"
             && ctx.get_payload().to_owned().contains("test_hook_before")
         {
-            ctx.emit_event("test_tx_hook_before invoked".to_owned());
+            ctx.emit_event("test_tx_hook_before invoked".to_owned())?;
         }
+        Ok(())
     }
 
     #[tx_hook_after]
-    fn test_tx_hook_after(&mut self, ctx: ServiceContext) {
+    fn test_tx_hook_after(&mut self, ctx: ServiceContext) -> ProtocolResult<()> {
         if ctx.get_service_name() == "test"
             && ctx.get_payload().to_owned().contains("test_hook_after")
         {
-            ctx.emit_event("test_tx_hook_after invoked".to_owned());
+            ctx.emit_event("test_tx_hook_after invoked".to_owned())?;
         }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Display, From)]
+pub enum ServiceError {}
+
+impl std::error::Error for ServiceError {}
+
+impl From<ServiceError> for ProtocolError {
+    fn from(err: ServiceError) -> ProtocolError {
+        ProtocolError::new(ProtocolErrorKind::Service, Box::new(err))
     }
 }

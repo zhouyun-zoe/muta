@@ -6,7 +6,7 @@ use derive_more::Display;
 use async_trait::async_trait;
 use protocol::traits::ExecutorFactory;
 use protocol::traits::{
-    APIAdapter, Context, ExecutorParams, MemPool, ServiceMapping, ServiceResponse, Storage,
+    APIAdapter, Context, ExecResp, ExecutorParams, MemPool, ServiceMapping, Storage,
 };
 use protocol::types::{Address, Block, Hash, Receipt, SignedTransaction, TransactionRequest};
 use protocol::{ProtocolError, ProtocolErrorKind, ProtocolResult};
@@ -124,7 +124,7 @@ impl<
         service_name: String,
         method: String,
         payload: String,
-    ) -> ProtocolResult<ServiceResponse<String>> {
+    ) -> ProtocolResult<ExecResp> {
         let block = self.get_block_by_height(ctx.clone(), Some(height)).await?;
 
         let executor = EF::from_root(

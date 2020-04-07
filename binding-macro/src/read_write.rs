@@ -1,9 +1,11 @@
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::punctuated::Punctuated;
-use syn::{parse_macro_input, FnArg, ImplItemMethod, ReturnType, Token, Visibility};
+use syn::{parse_macro_input, FnArg, ImplItemMethod, ReturnType, Token, Type, Visibility};
 
-use crate::common::{arg_is_immutable_receiver, arg_is_mutable_receiver, assert_type};
+use crate::common::{
+    arg_is_immutable_receiver, arg_is_mutable_receiver, assert_type, get_protocol_result_args,
+};
 
 pub fn verify_read_or_write(item: TokenStream, mutable: bool) -> TokenStream {
     let method_item = parse_macro_input!(item as ImplItemMethod);
@@ -56,5 +58,12 @@ fn verify_ret_type(ret_type: &ReturnType) {
         _ => panic!("The return type of read/write method must be protocol::ProtocolResult"),
     };
 
-    assert_type(&real_ret_type, "ServiceResponse");
+    match real_ret_type {
+        Type::Path(type_path) => {
+            let path = &type_path.path;
+            get_protocol_result_args(&path)
+                .expect("The return type of read/write method must be protocol::ProtocolResult");
+        }
+        _ => panic!("The return type of read/write method must be protocol::ProtocolResult"),
+    }
 }

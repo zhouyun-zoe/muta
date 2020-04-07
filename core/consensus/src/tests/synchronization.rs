@@ -12,7 +12,7 @@ use common_merkle::Merkle;
 
 use protocol::fixed_codec::FixedCodec;
 use protocol::traits::{CommonConsensusAdapter, Synchronization, SynchronizationAdapter};
-use protocol::traits::{Context, ExecutorParams, ExecutorResp, ServiceResponse};
+use protocol::traits::{Context, ExecutorParams, ExecutorResp};
 use protocol::types::{
     Address, Block, BlockHeader, Bytes, Hash, Hex, MerkleRoot, Metadata, Proof, RawTransaction,
     Receipt, ReceiptResponse, SignedTransaction, TransactionRequest, Validator, ValidatorExtend,
@@ -446,11 +446,8 @@ fn get_receipt(tx: &SignedTransaction, height: u64) -> Receipt {
         response: ReceiptResponse {
             service_name: "sync".to_owned(),
             method:       "sync_exec".to_owned(),
-            response:     ServiceResponse::<String> {
-                code:          0,
-                succeed_data:  "ok".to_owned(),
-                error_message: "".to_owned(),
-            },
+            ret:          "".to_owned(),
+            is_error:     false,
         },
     }
 }

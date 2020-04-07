@@ -5,10 +5,12 @@ pub mod types;
 use std::collections::BTreeMap;
 
 use bytes::Bytes;
+use derive_more::{Display, From};
 
-use binding_macro::{cycles, genesis, service};
-use protocol::traits::{ExecutorParams, ServiceResponse, ServiceSDK, StoreMap};
+use binding_macro::{cycles, genesis, service, write};
+use protocol::traits::{ExecutorParams, ServiceSDK, StoreMap};
 use protocol::types::{Address, Hash, ServiceContext};
+use protocol::{ProtocolError, ProtocolErrorKind, ProtocolResult};
 
 use crate::types::{
     ApproveEvent, ApprovePayload, Asset, AssetBalance, CreateAssetPayload, GetAllowancePayload,
@@ -23,14 +25,14 @@ pub struct AssetService<SDK> {
 
 #[service]
 impl<SDK: ServiceSDK> AssetService<SDK> {
-    pub fn new(mut sdk: SDK) -> Self {
-        let assets: Box<dyn StoreMap<Hash, Asset>> = sdk.alloc_or_recover_map("assets");
+    pub fn new(mut sdk: SDK) -> ProtocolResult<Self> {
+        let assets: Box<dyn StoreMap<Hash, Asset>> = sdk.alloc_or_recover_map("assets")?;
 
-        Self { sdk, assets }
+        Ok(Self { sdk, assets })
     }
 
     #[genesis]
-    fn init_genesis(&mut self, payload: InitGenesisPayload) {
+    fn init_genesis(&mut self, payload: InitGenesisPayload) -> ProtocolResult<()> {
         let asset = Asset {
             id:     payload.id,
             name:   payload.name,
@@ -39,7 +41,7 @@ impl<SDK: ServiceSDK> AssetService<SDK> {
             issuer: payload.issuer.clone(),
         };
 
-        self.assets.insert(asset.id.clone(), asset.clone());
+        self.assets.insert(asset.id.clone(), asset.clone())?;
 
         let asset_balance = AssetBalance {
             value:     payload.supply,
@@ -52,12 +54,9 @@ impl<SDK: ServiceSDK> AssetService<SDK> {
 
     #[cycles(100_00)]
     #[read]
-    fn get_asset(&self, ctx: ServiceContext, payload: GetAssetPayload) -> ServiceResponse<Asset> {
-        if let Some(asset) = self.assets.get(&payload.id) {
-            ServiceResponse::<Asset>::from_succeed(asset)
-        } else {
-            ServiceResponse::<Asset>::from_error(101, "asset id not existed".to_owned())
-        }
+    fn get_asset(&self, ctx: ServiceContext, payload: GetAssetPayload) -> ProtocolResult<Asset> {
+        let asset = self.assets.get(&payload.id)?;
+        Ok(asset)
     }
 
     #[cycles(100_00)]
@@ -66,29 +65,27 @@ impl<SDK: ServiceSDK> AssetService<SDK> {
         &self,
         ctx: ServiceContext,
         payload: GetBalancePayload,
-    ) -> ServiceResponse<GetBalanceResponse> {
-        if !self.assets.contains(&payload.asset_id) {
-            return ServiceResponse::<GetBalanceResponse>::from_error(
-                101,
-                "asset id not existed".to_owned(),
-            );
+    ) -> ProtocolResult<GetBalanceResponse> {
+        if !self.assets.contains(&payload.asset_id)? {
+            return Err(ServiceError::NotFoundAsset {
+                id: payload.asset_id,
+            }
+            .into());
         }
 
         let asset_balance = self
             .sdk
-            .get_account_value(&payload.user, &payload.asset_id)
+            .get_account_value(&payload.user, &payload.asset_id)?
             .unwrap_or(AssetBalance {
                 value:     0,
                 allowance: BTreeMap::new(),
             });
 
-        let res = GetBalanceResponse {
+        Ok(GetBalanceResponse {
             asset_id: payload.asset_id,
             user:     payload.user,
             balance:  asset_balance.value,
-        };
-
-        ServiceResponse::<GetBalanceResponse>::from_succeed(res)
+        })
     }
 
     #[cycles(100_00)]
@@ -97,36 +94,34 @@ impl<SDK: ServiceSDK> AssetService<SDK> {
         &self,
         ctx: ServiceContext,
         payload: GetAllowancePayload,
-    ) -> ServiceResponse<GetAllowanceResponse> {
-        if !self.assets.contains(&payload.asset_id) {
-            return ServiceResponse::<GetAllowanceResponse>::from_error(
-                101,
-                "asset id not existed".to_owned(),
-            );
+    ) -> ProtocolResult<GetAllowanceResponse> {
+        if !self.assets.contains(&payload.asset_id)? {
+            return Err(ServiceError::NotFoundAsset {
+                id: payload.asset_id,
+            }
+            .into());
         }
 
         let opt_asset_balance: Option<AssetBalance> = self
             .sdk
-            .get_account_value(&payload.grantor, &payload.asset_id);
+            .get_account_value(&payload.grantor, &payload.asset_id)?;
 
         if let Some(v) = opt_asset_balance {
             let allowance = v.allowance.get(&payload.grantee).unwrap_or(&0);
 
-            let res = GetAllowanceResponse {
+            Ok(GetAllowanceResponse {
                 asset_id: payload.asset_id,
                 grantor:  payload.grantor,
                 grantee:  payload.grantee,
                 value:    *allowance,
-            };
-            ServiceResponse::<GetAllowanceResponse>::from_succeed(res)
+            })
         } else {
-            let res = GetAllowanceResponse {
+            Ok(GetAllowanceResponse {
                 asset_id: payload.asset_id,
                 grantor:  payload.grantor,
                 grantee:  payload.grantee,
                 value:    0,
-            };
-            ServiceResponse::<GetAllowanceResponse>::from_succeed(res)
+            })
         }
     }
 
@@ -136,19 +131,14 @@ impl<SDK: ServiceSDK> AssetService<SDK> {
         &mut self,
         ctx: ServiceContext,
         payload: CreateAssetPayload,
-    ) -> ServiceResponse<Asset> {
+    ) -> ProtocolResult<Asset> {
         let caller = ctx.get_caller();
-        let payload_res = serde_json::to_string(&payload);
-
-        if let Err(e) = payload_res {
-            return ServiceResponse::<Asset>::from_error(103, format!("{:?}", e));
-        }
-        let payload_str = payload_res.unwrap();
+        let payload_str = serde_json::to_string(&payload).map_err(ServiceError::JsonParse)?;
 
         let id = Hash::digest(Bytes::from(payload_str + &caller.as_hex()));
 
-        if self.assets.contains(&id) {
-            return ServiceResponse::<Asset>::from_error(102, "asset id existed".to_owned());
+        if self.assets.contains(&id)? {
+            return Err(ServiceError::Exists { id }.into());
         }
         let asset = Asset {
             id:     id.clone(),
@@ -157,7 +147,7 @@ impl<SDK: ServiceSDK> AssetService<SDK> {
             supply: payload.supply,
             issuer: caller,
         };
-        self.assets.insert(id, asset.clone());
+        self.assets.insert(id, asset.clone())?;
 
         let asset_balance = AssetBalance {
             value:     payload.supply,
@@ -165,34 +155,27 @@ impl<SDK: ServiceSDK> AssetService<SDK> {
         };
 
         self.sdk
-            .set_account_value(&asset.issuer, asset.id.clone(), asset_balance);
+            .set_account_value(&asset.issuer, asset.id.clone(), asset_balance)?;
 
-        let event_res = serde_json::to_string(&asset);
+        let event_str = serde_json::to_string(&asset).map_err(ServiceError::JsonParse)?;
+        ctx.emit_event(event_str)?;
 
-        if let Err(e) = event_res {
-            return ServiceResponse::<Asset>::from_error(103, format!("{:?}", e));
-        }
-        let event_str = event_res.unwrap();
-        ctx.emit_event(event_str);
-
-        ServiceResponse::<Asset>::from_succeed(asset)
+        Ok(asset)
     }
 
     #[cycles(210_00)]
     #[write]
-    fn transfer(&mut self, ctx: ServiceContext, payload: TransferPayload) -> ServiceResponse<()> {
+    fn transfer(&mut self, ctx: ServiceContext, payload: TransferPayload) -> ProtocolResult<()> {
         let caller = ctx.get_caller();
         let asset_id = payload.asset_id.clone();
         let value = payload.value;
         let to = payload.to;
 
-        if !self.assets.contains(&payload.asset_id) {
-            return ServiceResponse::<()>::from_error(101, "asset id not existed".to_owned());
+        if !self.assets.contains(&asset_id)? {
+            return Err(ServiceError::NotFoundAsset { id: asset_id }.into());
         }
 
-        if let Err(e) = self._transfer(caller.clone(), to.clone(), asset_id.clone(), value) {
-            return ServiceResponse::<()>::from_error(106, format!("{:?}", e));
-        };
+        self._transfer(caller.clone(), to.clone(), asset_id.clone(), value)?;
 
         let event = TransferEvent {
             asset_id,
@@ -200,36 +183,29 @@ impl<SDK: ServiceSDK> AssetService<SDK> {
             to,
             value,
         };
-        let event_res = serde_json::to_string(&event);
-
-        if let Err(e) = event_res {
-            return ServiceResponse::<()>::from_error(103, format!("{:?}", e));
-        };
-        let event_str = event_res.unwrap();
-        ctx.emit_event(event_str);
-
-        ServiceResponse::<()>::from_succeed(())
+        let event_str = serde_json::to_string(&event).map_err(ServiceError::JsonParse)?;
+        ctx.emit_event(event_str)
     }
 
     #[cycles(210_00)]
     #[write]
-    fn approve(&mut self, ctx: ServiceContext, payload: ApprovePayload) -> ServiceResponse<()> {
+    fn approve(&mut self, ctx: ServiceContext, payload: ApprovePayload) -> ProtocolResult<()> {
         let caller = ctx.get_caller();
         let asset_id = payload.asset_id.clone();
         let value = payload.value;
         let to = payload.to;
 
         if caller == to {
-            return ServiceResponse::<()>::from_error(104, "cann't approve to yourself".to_owned());
+            return Err(ServiceError::ApproveToYourself.into());
         }
 
-        if !self.assets.contains(&payload.asset_id) {
-            return ServiceResponse::<()>::from_error(101, "asset id not existed".to_owned());
+        if !self.assets.contains(&asset_id)? {
+            return Err(ServiceError::NotFoundAsset { id: asset_id }.into());
         }
 
         let mut caller_asset_balance: AssetBalance = self
             .sdk
-            .get_account_value(&caller, &asset_id)
+            .get_account_value(&caller, &asset_id)?
             .unwrap_or(AssetBalance {
                 value:     0,
                 allowance: BTreeMap::new(),
@@ -241,7 +217,7 @@ impl<SDK: ServiceSDK> AssetService<SDK> {
             .or_insert(value);
 
         self.sdk
-            .set_account_value(&caller, asset_id.clone(), caller_asset_balance);
+            .set_account_value(&caller, asset_id.clone(), caller_asset_balance)?;
 
         let event = ApproveEvent {
             asset_id,
@@ -249,15 +225,8 @@ impl<SDK: ServiceSDK> AssetService<SDK> {
             grantee: to,
             value,
         };
-        let event_res = serde_json::to_string(&event);
-
-        if let Err(e) = event_res {
-            return ServiceResponse::<()>::from_error(103, format!("{:?}", e));
-        };
-        let event_str = event_res.unwrap();
-        ctx.emit_event(event_str);
-
-        ServiceResponse::<()>::from_succeed(())
+        let event_str = serde_json::to_string(&event).map_err(ServiceError::JsonParse)?;
+        ctx.emit_event(event_str)
     }
 
     #[cycles(210_00)]
@@ -266,20 +235,20 @@ impl<SDK: ServiceSDK> AssetService<SDK> {
         &mut self,
         ctx: ServiceContext,
         payload: TransferFromPayload,
-    ) -> ServiceResponse<()> {
+    ) -> ProtocolResult<()> {
         let caller = ctx.get_caller();
         let sender = payload.sender;
         let recipient = payload.recipient;
         let asset_id = payload.asset_id;
         let value = payload.value;
 
-        if !self.assets.contains(&asset_id) {
-            return ServiceResponse::<()>::from_error(101, "asset id not existed".to_owned());
+        if !self.assets.contains(&asset_id)? {
+            return Err(ServiceError::NotFoundAsset { id: asset_id }.into());
         }
 
         let mut sender_asset_balance: AssetBalance = self
             .sdk
-            .get_account_value(&sender, &asset_id)
+            .get_account_value(&sender, &asset_id)?
             .unwrap_or(AssetBalance {
                 value:     0,
                 allowance: BTreeMap::new(),
@@ -289,7 +258,11 @@ impl<SDK: ServiceSDK> AssetService<SDK> {
             .entry(caller.clone())
             .or_insert(0);
         if *sender_allowance < value {
-            return ServiceResponse::<()>::from_error(105, "insufficient balance".to_owned());
+            return Err(ServiceError::LackOfBalance {
+                expect: value,
+                real:   *sender_allowance,
+            }
+            .into());
         }
         let after_sender_allowance = *sender_allowance - value;
         sender_asset_balance
@@ -298,11 +271,9 @@ impl<SDK: ServiceSDK> AssetService<SDK> {
             .and_modify(|e| *e = after_sender_allowance)
             .or_insert(after_sender_allowance);
         self.sdk
-            .set_account_value(&sender, asset_id.clone(), sender_asset_balance);
+            .set_account_value(&sender, asset_id.clone(), sender_asset_balance)?;
 
-        if let Err(e) = self._transfer(sender.clone(), recipient.clone(), asset_id.clone(), value) {
-            return ServiceResponse::<()>::from_error(106, format!("{:?}", e));
-        };
+        self._transfer(sender.clone(), recipient.clone(), asset_id.clone(), value)?;
 
         let event = TransferFromEvent {
             asset_id,
@@ -311,15 +282,8 @@ impl<SDK: ServiceSDK> AssetService<SDK> {
             recipient,
             value,
         };
-        let event_res = serde_json::to_string(&event);
-
-        if let Err(e) = event_res {
-            return ServiceResponse::<()>::from_error(103, format!("{:?}", e));
-        };
-        let event_str = event_res.unwrap();
-        ctx.emit_event(event_str);
-
-        ServiceResponse::<()>::from_succeed(())
+        let event_str = serde_json::to_string(&event).map_err(ServiceError::JsonParse)?;
+        ctx.emit_event(event_str)
     }
 
     fn _transfer(
@@ -328,14 +292,14 @@ impl<SDK: ServiceSDK> AssetService<SDK> {
         recipient: Address,
         asset_id: Hash,
         value: u64,
-    ) -> Result<(), String> {
+    ) -> ProtocolResult<()> {
         if recipient == sender {
-            return Err("cann't send value to yourself".to_owned());
+            return Err(ServiceError::RecipientIsSender.into());
         }
 
         let mut sender_asset_balance: AssetBalance = self
             .sdk
-            .get_account_value(&sender, &asset_id)
+            .get_account_value(&sender, &asset_id)?
             .unwrap_or(AssetBalance {
                 value:     0,
                 allowance: BTreeMap::new(),
@@ -343,12 +307,16 @@ impl<SDK: ServiceSDK> AssetService<SDK> {
         let sender_balance = sender_asset_balance.value;
 
         if sender_balance < value {
-            return Err("insufficient balance".to_owned());
+            return Err(ServiceError::LackOfBalance {
+                expect: value,
+                real:   sender_balance,
+            }
+            .into());
         }
 
         let mut to_asset_balance: AssetBalance = self
             .sdk
-            .get_account_value(&recipient, &asset_id)
+            .get_account_value(&recipient, &asset_id)?
             .unwrap_or(AssetBalance {
                 value:     0,
                 allowance: BTreeMap::new(),
@@ -356,21 +324,57 @@ impl<SDK: ServiceSDK> AssetService<SDK> {
 
         let (v, overflow) = to_asset_balance.value.overflowing_add(value);
         if overflow {
-            return Err("u64 overflow".to_owned());
+            return Err(ServiceError::U64Overflow.into());
         }
         to_asset_balance.value = v;
 
         self.sdk
-            .set_account_value(&recipient, asset_id.clone(), to_asset_balance);
+            .set_account_value(&recipient, asset_id.clone(), to_asset_balance)?;
 
         let (v, overflow) = sender_balance.overflowing_sub(value);
         if overflow {
-            return Err("u64 overflow".to_owned());
+            return Err(ServiceError::U64Overflow.into());
         }
         sender_asset_balance.value = v;
         self.sdk
-            .set_account_value(&sender, asset_id, sender_asset_balance);
+            .set_account_value(&sender, asset_id, sender_asset_balance)?;
 
         Ok(())
+    }
+}
+
+#[derive(Debug, Display, From)]
+pub enum ServiceError {
+    #[display(fmt = "Parsing payload to json failed {:?}", _0)]
+    JsonParse(serde_json::Error),
+
+    #[display(fmt = "Asset {:?} already exists", id)]
+    Exists {
+        id: Hash,
+    },
+
+    #[display(fmt = "Not found asset, id {:?}", id)]
+    NotFoundAsset {
+        id: Hash,
+    },
+
+    #[display(fmt = "Not found asset, expect {:?} real {:?}", expect, real)]
+    LackOfBalance {
+        expect: u64,
+        real:   u64,
+    },
+
+    U64Overflow,
+
+    RecipientIsSender,
+
+    ApproveToYourself,
+}
+
+impl std::error::Error for ServiceError {}
+
+impl From<ServiceError> for ProtocolError {
+    fn from(err: ServiceError) -> ProtocolError {
+        ProtocolError::new(ProtocolErrorKind::Service, Box::new(err))
     }
 }

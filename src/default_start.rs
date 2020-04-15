@@ -1,9 +1,13 @@
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::sync::Arc;
+use std::thread;
 
 use bytes::Bytes;
 use futures::{future, lock::Mutex};
+use rustracing::sampler::AllSampler;
+use rustracing_jaeger::reporter::JaegerCompactReporter;
+use rustracing_jaeger::Tracer;
 #[cfg(unix)]
 use tokio::signal::unix::{self as os_impl};
 
@@ -142,6 +146,16 @@ pub async fn start<Mapping: 'static + ServiceMapping>(
     service_mapping: Arc<Mapping>,
 ) -> ProtocolResult<()> {
     log::info!("node starts");
+    let (span_tx, span_rx) = crossbeam_channel::bounded(50);
+    let tracer = Tracer::with_sender(AllSampler, span_tx);
+
+    let reporter = JaegerCompactReporter::new("muta").unwrap();
+    thread::spawn(move || {
+        while let Ok(span) = span_rx.try_recv() {
+            let _ = reporter.report(&[span]);
+        }
+    });
+
     // Init Block db
     let path_block = config.data_path_for_block();
     log::info!("Data path for block: {:?}", path_block);
@@ -221,6 +235,7 @@ pub async fn start<Mapping: 'static + ServiceMapping>(
         Arc::clone(&storage),
         Arc::clone(&trie_db),
         Arc::clone(&service_mapping),
+        tracer.clone(),
     );
 
     // Create full transactions wal
@@ -356,6 +371,7 @@ pub async fn start<Mapping: 'static + ServiceMapping>(
             Arc::clone(&service_mapping),
             status_agent.clone(),
             Arc::clone(&crypto),
+            tracer.clone(),
         )?;
 
     let exec_demon = consensus_adapter.take_exec_demon();
@@ -370,6 +386,7 @@ pub async fn start<Mapping: 'static + ServiceMapping>(
         Arc::clone(&txs_wal),
         Arc::clone(&consensus_adapter),
         Arc::clone(&lock),
+        tracer.clone(),
     ));
 
     consensus_adapter.set_overlord_handler(overlord_consensus.get_overlord_handler());

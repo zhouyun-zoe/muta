@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use cita_trie::DB as TrieDB;
 use derive_more::{Display, From};
+use rustracing_jaeger::Tracer;
 
 use bytes::BytesMut;
 use protocol::traits::{
@@ -43,6 +44,8 @@ pub struct ServiceExecutor<S: Storage, DB: TrieDB, Mapping: ServiceMapping> {
     querier:         Rc<DefaultChainQuerier<S>>,
     states:          Rc<HashMap<String, Rc<RefCell<GeneralServiceState<DB>>>>>,
     root_state:      Rc<RefCell<GeneralServiceState<DB>>>,
+
+    tracer: Tracer,
 }
 
 impl<S: Storage, DB: TrieDB, Mapping: ServiceMapping> Clone for ServiceExecutor<S, DB, Mapping> {
@@ -52,6 +55,8 @@ impl<S: Storage, DB: TrieDB, Mapping: ServiceMapping> Clone for ServiceExecutor<
             querier:         Rc::clone(&self.querier),
             states:          Rc::clone(&self.states),
             root_state:      Rc::clone(&self.root_state),
+
+            tracer: self.tracer.clone(),
         }
     }
 }
@@ -107,6 +112,7 @@ impl<S: 'static + Storage, DB: 'static + TrieDB, Mapping: 'static + ServiceMappi
         trie_db: Arc<DB>,
         storage: Arc<S>,
         service_mapping: Arc<Mapping>,
+        tracer: Tracer,
     ) -> ProtocolResult<Self> {
         let trie = MPTTrie::from(root, Arc::clone(&trie_db))?;
         let root_state = GeneralServiceState::new(trie);
@@ -127,6 +133,7 @@ impl<S: 'static + Storage, DB: 'static + TrieDB, Mapping: 'static + ServiceMappi
             querier: Rc::new(DefaultChainQuerier::new(storage)),
             states: Rc::new(states),
             root_state: Rc::new(RefCell::new(root_state)),
+            tracer,
         })
     }
 
@@ -324,23 +331,40 @@ impl<S: 'static + Storage, DB: 'static + TrieDB, Mapping: 'static + ServiceMappi
         params: &ExecutorParams,
         txs: &[SignedTransaction],
     ) -> ProtocolResult<ExecutorResp> {
-        self.hook(HookType::Before, params)?;
+        let tracer = self.tracer.clone();
+        let parent_span = tracer.span("exec_service").start();
+        {
+            let _child_span = tracer
+                .span("exec_hook_before")
+                .child_of(&parent_span)
+                .start();
+            self.hook(HookType::Before, params)?;
+        }
 
         let mut receipts = txs
             .iter()
             .map(|stx| {
                 let caller = Address::from_pubkey_bytes(stx.pubkey.clone())?;
-                let context = self.get_context(
-                    Some(stx.tx_hash.clone()),
-                    Some(stx.raw.nonce.clone()),
-                    &caller,
-                    stx.raw.cycles_price,
-                    stx.raw.cycles_limit,
-                    params,
-                    &stx.raw.request,
-                )?;
+                let context = {
+                    let _child_span = tracer.span("exec_get_ctx").child_of(&parent_span).start();
+                    self.get_context(
+                        Some(stx.tx_hash.clone()),
+                        Some(stx.raw.nonce.clone()),
+                        &caller,
+                        stx.raw.cycles_price,
+                        stx.raw.cycles_limit,
+                        params,
+                        &stx.raw.request,
+                    )?
+                };
 
-                let exec_resp = self.catch_call(context.clone(), ExecType::Write)?;
+                let exec_resp = {
+                    let child_span = tracer
+                        .span("exec_catcha_all")
+                        .child_of(&parent_span)
+                        .start();
+                    self.catch_call(context.clone(), ExecType::Write)?
+                };
 
                 Ok(Receipt {
                     state_root:  MerkleRoot::from_empty(),
@@ -357,16 +381,32 @@ impl<S: 'static + Storage, DB: 'static + TrieDB, Mapping: 'static + ServiceMappi
             })
             .collect::<Result<Vec<Receipt>, ProtocolError>>()?;
 
-        self.hook(HookType::After, params)?;
+        {
+            let _child_span = tracer
+                .span("exec_hook_before")
+                .child_of(&parent_span)
+                .start();
+            self.hook(HookType::After, params)?;
+        }
 
-        let state_root = self.commit()?;
+        let state_root = {
+            let _child_span = tracer.span("exec_commit").child_of(&parent_span).start();
+            self.commit()?
+        };
         let mut all_cycles_used = 0;
 
         for receipt in receipts.iter_mut() {
             receipt.state_root = state_root.clone();
             all_cycles_used += receipt.cycles_used;
         }
-        let logs_bloom = self.logs_bloom(&receipts);
+
+        let logs_bloom = {
+            let _child_span = tracer
+                .span("exec_cal_logs_bloom")
+                .child_of(&parent_span)
+                .start();
+            self.logs_bloom(&receipts)
+        };
 
         Ok(ExecutorResp {
             receipts,

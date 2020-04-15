@@ -13,6 +13,8 @@ use overlord::types::{Commit, Node, OverlordMsg, Status};
 use overlord::{Consensus as Engine, DurationConfig, Wal};
 use parking_lot::RwLock;
 use rlp::Encodable;
+use rustracing::tag::Tag;
+use rustracing_jaeger::Tracer;
 use serde_json::json;
 
 use common_crypto::BlsPublicKey;
@@ -44,6 +46,7 @@ pub struct ConsensusEngine<Adapter> {
     status_agent:   StatusAgent,
     node_info:      NodeInfo,
     exemption_hash: RwLock<HashSet<Bytes>>,
+    tracer:         Tracer,
 
     adapter: Arc<Adapter>,
     txs_wal: Arc<SignedTxsWAL>,
@@ -58,6 +61,9 @@ impl<Adapter: ConsensusAdapter + 'static> Engine<FixedPill> for ConsensusEngine<
         ctx: Context,
         next_height: u64,
     ) -> Result<(FixedPill, Bytes), Box<dyn Error + Send>> {
+        let tracer = self.tracer.clone();
+        let parent_span = tracer.span("consensus_get_block").start();
+
         let current_consensus_status = self.status_agent.to_inner();
 
         if current_consensus_status.latest_committed_height
@@ -69,16 +75,23 @@ impl<Adapter: ConsensusAdapter + 'static> Engine<FixedPill> for ConsensusEngine<
             current_consensus_status.current_proof)
         }
 
-        let (ordered_tx_hashes, propose_hashes) = self
-            .adapter
-            .get_txs_from_mempool(
-                ctx,
-                next_height,
-                current_consensus_status.cycles_limit,
-                current_consensus_status.tx_num_limit,
-            )
-            .await?
-            .clap();
+        let (ordered_tx_hashes, propose_hashes) = {
+            let child_span = tracer
+                .span("get_txs_from_wal")
+                .child_of(&parent_span)
+                .tag(Tag::new("height", next_height as i64))
+                .start();
+
+            self.adapter
+                .get_txs_from_mempool(
+                    ctx,
+                    next_height,
+                    current_consensus_status.cycles_limit,
+                    current_consensus_status.tx_num_limit,
+                )
+                .await?
+                .clap()
+        };
 
         if current_consensus_status.latest_committed_height != next_height - 1 {
             return Err(ProtocolError::from(ConsensusError::MissingBlockHeader(
@@ -129,7 +142,14 @@ impl<Adapter: ConsensusAdapter + 'static> Engine<FixedPill> for ConsensusEngine<
         let fixed_pill = FixedPill {
             inner: pill.clone(),
         };
-        let hash = Hash::digest(pill.block.encode_fixed()?).as_bytes();
+        let hash = {
+            let child_span = tracer
+                .span("cal_block_header_hash")
+                .child_of(&parent_span)
+                .tag(Tag::new("height", next_height as i64))
+                .start();
+            Hash::digest(pill.block.encode_fixed()?).as_bytes()
+        };
         let mut set = self.exemption_hash.write();
         set.insert(hash.clone());
 
@@ -145,6 +165,9 @@ impl<Adapter: ConsensusAdapter + 'static> Engine<FixedPill> for ConsensusEngine<
     ) -> Result<(), Box<dyn Error + Send>> {
         let time = Instant::now();
 
+        let tracer = self.tracer.clone();
+        let parent_span = tracer.span("consensus_get_block").start();
+
         if block.inner.block.header.height != block.inner.block.header.proof.height + 1 {
             log::error!("[consensus-engine]: check_block for overlord receives a proposal, error, block height {}, block {:?}", block.inner.block.header.height,block.inner.block);
         }
@@ -157,6 +180,12 @@ impl<Adapter: ConsensusAdapter + 'static> Engine<FixedPill> for ConsensusEngine<
         // If the block is proposed by self, it does not need to check. Get full signed
         // transactions directly.
         if !exemption {
+            let _child_span = tracer
+                .span("chech_block_header")
+                .child_of(&parent_span)
+                .tag(Tag::new("txs_len", order_hashes_len as i64))
+                .start();
+
             self.check_block_roots(&block.inner.block.header)?;
 
             self.adapter
@@ -227,8 +256,15 @@ impl<Adapter: ConsensusAdapter + 'static> Engine<FixedPill> for ConsensusEngine<
             Instant::now() - time
         );
         let time = Instant::now();
-        self.txs_wal
-            .save(next_height, Hash::from_bytes(hash)?, txs)?;
+        {
+            let _child_span = tracer
+                .span("write_txs_wal")
+                .child_of(&parent_span)
+                .tag(Tag::new("txs_len", order_hashes_len as i64))
+                .start();
+            self.txs_wal
+                .save(next_height, Hash::from_bytes(hash)?, txs)?;
+        }
 
         log::info!(
             "[consensus-engine]: write wal cost {:?} order_hashes_len {:?}",
@@ -255,6 +291,8 @@ impl<Adapter: ConsensusAdapter + 'static> Engine<FixedPill> for ConsensusEngine<
             );
         }
 
+        let tracer = self.tracer.clone();
+        let parent_span = tracer.span("consensus_commit").start();
         let current_consensus_status = self.status_agent.to_inner();
         if current_consensus_status.exec_height == current_height {
             let status = Status {
@@ -285,17 +323,31 @@ impl<Adapter: ConsensusAdapter + 'static> Engine<FixedPill> for ConsensusEngine<
             bitmap,
         };
 
-        self.adapter.save_proof(ctx.clone(), proof.clone()).await?;
+        {
+            let _child_span = tracer
+                .span("save_proof")
+                .child_of(&parent_span)
+                .tag(Tag::new("height", current_height as i64))
+                .start();
+            self.adapter.save_proof(ctx.clone(), proof.clone()).await?;
+        }
 
         // Get full transactions from mempool. If is error, try get from wal.
         let ordered_tx_hashes = pill.block.ordered_tx_hashes.clone();
-        let signed_txs = match self
-            .adapter
-            .get_full_txs(ctx.clone(), ordered_tx_hashes.clone())
-            .await
-        {
-            Ok(txs) => txs,
-            Err(_) => self.txs_wal.load(current_height, block_hash)?,
+        let signed_txs = {
+            let _child_span = tracer
+                .span("get_signed_txs")
+                .child_of(&parent_span)
+                .tag(Tag::new("txs_len", ordered_tx_hashes.len() as i64))
+                .start();
+            match self
+                .adapter
+                .get_full_txs(ctx.clone(), ordered_tx_hashes.clone())
+                .await
+            {
+                Ok(txs) => txs,
+                Err(_) => self.txs_wal.load(current_height, block_hash)?,
+            }
         };
 
         // Execute transactions
@@ -320,29 +372,57 @@ impl<Adapter: ConsensusAdapter + 'static> Engine<FixedPill> for ConsensusEngine<
 
         trace_block(&pill.block);
         let block_exec_height = pill.block.header.exec_height;
-        let metadata = self.adapter.get_metadata(
-            ctx.clone(),
-            pill.block.header.state_root.clone(),
-            pill.block.header.height,
-            pill.block.header.timestamp,
-        )?;
+        let metadata = {
+            let _child_span = tracer
+                .span("get_metadata")
+                .child_of(&parent_span)
+                .tag(Tag::new("height", current_height as i64))
+                .start();
+            self.adapter.get_metadata(
+                ctx.clone(),
+                pill.block.header.state_root.clone(),
+                pill.block.header.height,
+                pill.block.header.timestamp,
+            )?
+        };
         log::info!(
             "[consensus]: validator of height {} is {:?}",
             current_height + 1,
             metadata.verifier_list
         );
 
-        self.update_status(metadata, pill.block, proof, signed_txs)
-            .await?;
+        {
+            let _child_span = tracer
+                .span("update_status")
+                .child_of(&parent_span)
+                .tag(Tag::new("height", current_height as i64))
+                .start();
+            self.update_status(metadata, pill.block, proof, signed_txs)
+                .await?;
+        }
 
-        self.adapter
-            .flush_mempool(ctx.clone(), &ordered_tx_hashes)
-            .await?;
+        {
+            let _child_span = tracer
+                .span("flush_mempool")
+                .child_of(&parent_span)
+                .tag(Tag::new("height", current_height as i64))
+                .start();
+            self.adapter
+                .flush_mempool(ctx.clone(), &ordered_tx_hashes)
+                .await?;
+        }
 
         self.adapter
             .broadcast_height(ctx.clone(), current_height)
             .await?;
-        self.txs_wal.remove(block_exec_height)?;
+        {
+            let _child_span = tracer
+                .span("remove_txs_wal")
+                .child_of(&parent_span)
+                .tag(Tag::new("height", current_height as i64))
+                .start();
+            self.txs_wal.remove(block_exec_height)?;
+        }
 
         let mut set = self.exemption_hash.write();
         set.clear();
@@ -369,18 +449,24 @@ impl<Adapter: ConsensusAdapter + 'static> Engine<FixedPill> for ConsensusEngine<
         ctx: Context,
         msg: OverlordMsg<FixedPill>,
     ) -> Result<(), Box<dyn Error + Send>> {
+        let tracer = self.tracer.clone();
+        let parent_span = tracer.span("consensus_broadcast").start();
+
         let (end, msg) = match msg {
             OverlordMsg::SignedProposal(sp) => {
+                let _child_span = tracer.span("ser_proposal").child_of(&parent_span).start();
                 let bytes = sp.rlp_bytes();
                 (END_GOSSIP_SIGNED_PROPOSAL, bytes)
             }
 
             OverlordMsg::AggregatedVote(av) => {
+                let _child_span = tracer.span("ser_qc").child_of(&parent_span).start();
                 let bytes = av.rlp_bytes();
                 (END_GOSSIP_AGGREGATED_VOTE, bytes)
             }
 
             OverlordMsg::SignedChoke(sc) => {
+                let _child_span = tracer.span("ser_choke").child_of(&parent_span).start();
                 let bytes = sc.rlp_bytes();
                 (END_GOSSIP_SIGNED_CHOKE, bytes)
             }
@@ -388,9 +474,12 @@ impl<Adapter: ConsensusAdapter + 'static> Engine<FixedPill> for ConsensusEngine<
             _ => unreachable!(),
         };
 
-        self.adapter
-            .transmit(ctx, msg, end, MessageTarget::Broadcast)
-            .await?;
+        {
+            let _child_span = tracer.span("broadcast_msg").child_of(&parent_span).start();
+            self.adapter
+                .transmit(ctx, msg, end, MessageTarget::Broadcast)
+                .await?;
+        }
         Ok(())
     }
 
@@ -401,6 +490,8 @@ impl<Adapter: ConsensusAdapter + 'static> Engine<FixedPill> for ConsensusEngine<
         addr: Bytes,
         msg: OverlordMsg<FixedPill>,
     ) -> Result<(), Box<dyn Error + Send>> {
+        let _parent_span = self.tracer.clone().span("consensus_transmit").start();
+
         match msg {
             OverlordMsg::SignedVote(sv) => {
                 let msg = sv.rlp_bytes();
@@ -467,6 +558,7 @@ impl<Adapter: ConsensusAdapter + 'static> Engine<FixedPill> for ConsensusEngine<
 #[async_trait]
 impl<Adapter: ConsensusAdapter + 'static> Wal for ConsensusEngine<Adapter> {
     async fn save(&self, info: Bytes) -> Result<(), Box<dyn Error + Send>> {
+        let _parent_span = self.tracer.clone().span("save_wal").start();
         self.adapter
             .save_overlord_wal(Context::new(), info)
             .await
@@ -488,6 +580,7 @@ impl<Adapter: ConsensusAdapter + 'static> ConsensusEngine<Adapter> {
         adapter: Arc<Adapter>,
         crypto: Arc<OverlordCrypto>,
         lock: Arc<Mutex<()>>,
+        tracer: Tracer,
     ) -> Self {
         Self {
             status_agent,
@@ -497,6 +590,7 @@ impl<Adapter: ConsensusAdapter + 'static> ConsensusEngine<Adapter> {
             adapter,
             crypto,
             lock,
+            tracer,
         }
     }
 

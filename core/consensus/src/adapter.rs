@@ -8,6 +8,7 @@ use async_trait::async_trait;
 use overlord::types::{Node, OverlordMsg, Vote, VoteType};
 use overlord::{extract_voters, Crypto, OverlordHandler};
 use parking_lot::RwLock;
+use rustracing_jaeger::Tracer;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
@@ -59,6 +60,7 @@ pub struct OverlordConsensusAdapter<
     exec_queue:  Sender<ExecuteInfo>,
     exec_demons: Option<ExecDemons<S, DB, EF, Mapping>>,
     crypto:      Arc<OverlordCrypto>,
+    tracer:      Tracer,
 }
 
 #[async_trait]
@@ -264,6 +266,7 @@ where
             Arc::clone(&self.trie_db),
             Arc::clone(&self.storage),
             Arc::clone(&self.service_mapping),
+            self.tracer.clone(),
         )?;
 
         let resp = executor.exec(params, txs)?;
@@ -409,6 +412,7 @@ where
             Arc::clone(&self.trie_db),
             Arc::clone(&self.storage),
             Arc::clone(&self.service_mapping),
+            self.tracer.clone(),
         )?;
 
         let caller = Address::from_hex("0x0000000000000000000000000000000000000000")?;
@@ -718,6 +722,7 @@ where
         service_mapping: Arc<Mapping>,
         status_agent: StatusAgent,
         crypto: Arc<OverlordCrypto>,
+        tracer: Tracer,
     ) -> ProtocolResult<Self> {
         let (exec_queue, rx) = channel(OVERLORD_GAP);
         let exec_demons = Some(ExecDemons::new(
@@ -726,6 +731,7 @@ where
             Arc::clone(&service_mapping),
             rx,
             status_agent,
+            tracer.clone(),
         ));
 
         let adapter = OverlordConsensusAdapter {
@@ -739,6 +745,7 @@ where
             exec_queue,
             exec_demons,
             crypto,
+            tracer,
         };
 
         Ok(adapter)
@@ -763,6 +770,7 @@ pub struct ExecDemons<S, DB, EF, Mapping> {
     pin_ef: PhantomData<EF>,
     queue:  Receiver<ExecuteInfo>,
     status: StatusAgent,
+    tracer: Tracer,
 }
 
 impl<S, DB, EF, Mapping> ExecDemons<S, DB, EF, Mapping>
@@ -778,6 +786,7 @@ where
         service_mapping: Arc<Mapping>,
         rx: Receiver<ExecuteInfo>,
         status_agent: StatusAgent,
+        tracer: Tracer,
     ) -> Self {
         ExecDemons {
             storage,
@@ -786,6 +795,7 @@ where
             queue: rx,
             pin_ef: PhantomData,
             status: status_agent,
+            tracer,
         }
     }
 
@@ -810,6 +820,7 @@ where
                 Arc::clone(&self.trie_db),
                 Arc::clone(&self.storage),
                 Arc::clone(&self.service_mapping),
+                self.tracer.clone(),
             )?;
             let exec_params = ExecutorParams {
                 state_root: state_root.clone(),

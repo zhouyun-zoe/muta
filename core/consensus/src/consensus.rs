@@ -7,6 +7,7 @@ use overlord::types::{
     AggregatedVote, Node, OverlordMsg, SignedChoke, SignedProposal, SignedVote, Status,
 };
 use overlord::{DurationConfig, Overlord, OverlordHandler};
+use rustracing_jaeger::Tracer;
 
 use protocol::traits::{Consensus, ConsensusAdapter, NodeInfo};
 use protocol::types::Validator;
@@ -76,6 +77,7 @@ impl<Adapter: ConsensusAdapter + 'static> OverlordConsensus<Adapter> {
         txs_wal: Arc<SignedTxsWAL>,
         adapter: Arc<Adapter>,
         lock: Arc<Mutex<()>>,
+        tracer: Tracer,
     ) -> Self {
         let engine = Arc::new(ConsensusEngine::new(
             status_agent.clone(),
@@ -84,6 +86,7 @@ impl<Adapter: ConsensusAdapter + 'static> OverlordConsensus<Adapter> {
             Arc::clone(&adapter),
             Arc::clone(&crypto),
             lock,
+            tracer,
         ));
 
         let overlord = Overlord::new(

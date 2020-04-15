@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use rustracing_jaeger::Tracer;
+
 use crate::traits::{ServiceMapping, Storage};
 use crate::types::{
     Address, Bloom, MerkleRoot, Receipt, ServiceContext, SignedTransaction, TransactionRequest,
@@ -69,6 +71,7 @@ pub trait ExecutorFactory<DB: cita_trie::DB, S: Storage, Mapping: ServiceMapping
         db: Arc<DB>,
         storage: Arc<S>,
         mapping: Arc<Mapping>,
+        tracer: Tracer,
     ) -> ProtocolResult<Box<dyn Executor>>;
 }
 

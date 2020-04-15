@@ -2,6 +2,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use derive_more::Display;
+use rustracing_jaeger::Tracer;
 
 use async_trait::async_trait;
 use protocol::traits::ExecutorFactory;
@@ -30,6 +31,7 @@ pub struct DefaultAPIAdapter<EF, M, S, DB, Mapping> {
     service_mapping: Arc<Mapping>,
 
     pin_ef: PhantomData<EF>,
+    tracer: Tracer,
 }
 
 impl<
@@ -45,6 +47,7 @@ impl<
         storage: Arc<S>,
         trie_db: Arc<DB>,
         service_mapping: Arc<Mapping>,
+        tracer: Tracer,
     ) -> Self {
         Self {
             mempool,
@@ -52,6 +55,7 @@ impl<
             trie_db,
             service_mapping,
             pin_ef: PhantomData,
+            tracer,
         }
     }
 }
@@ -132,6 +136,7 @@ impl<
             Arc::clone(&self.trie_db),
             Arc::clone(&self.storage),
             Arc::clone(&self.service_mapping),
+            self.tracer.clone(),
         )?;
 
         let params = ExecutorParams {

@@ -13,6 +13,7 @@ use std::sync::Arc;
 use cita_trie::DB as TrieDB;
 use derive_more::{Display, From};
 use rustracing_jaeger::Tracer;
+use rustracing::tag::Tag;
 
 use bytes::BytesMut;
 use protocol::traits::{
@@ -332,7 +333,11 @@ impl<S: 'static + Storage, DB: 'static + TrieDB, Mapping: 'static + ServiceMappi
         txs: &[SignedTransaction],
     ) -> ProtocolResult<ExecutorResp> {
         let tracer = self.tracer.clone();
-        let parent_span = tracer.span("exec_service").start();
+        let parent_span = tracer
+            .span("exec_service")
+            .tag(Tag::new("txs_len", txs.len() as i64))
+            .start();
+
         {
             let _child_span = tracer
                 .span("exec_hook_before")
@@ -342,7 +347,7 @@ impl<S: 'static + Storage, DB: 'static + TrieDB, Mapping: 'static + ServiceMappi
         }
 
         let mut receipts = {
-            let child_span = tracer.span("exec_txs").child_of(&parent_span).start();
+            let _child_span = tracer.span("exec_txs").child_of(&parent_span).start();
             txs.iter()
                 .map(|stx| {
                     let caller = Address::from_pubkey_bytes(stx.pubkey.clone())?;

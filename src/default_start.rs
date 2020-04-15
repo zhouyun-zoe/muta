@@ -511,8 +511,8 @@ pub async fn start<Mapping: 'static + ServiceMapping>(
     }
 
     let reporter = JaegerCompactReporter::new("muta").unwrap();
-    thread::spawn(move || {
-        while let Ok(span) = span_rx.try_recv() {
+    thread::spawn(move || loop {
+        if let Ok(span) = span_rx.try_recv() {
             let _ = reporter.report(&[span]);
         }
     });

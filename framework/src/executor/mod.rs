@@ -341,45 +341,42 @@ impl<S: 'static + Storage, DB: 'static + TrieDB, Mapping: 'static + ServiceMappi
             self.hook(HookType::Before, params)?;
         }
 
-        let mut receipts = txs
-            .iter()
-            .map(|stx| {
-                let caller = Address::from_pubkey_bytes(stx.pubkey.clone())?;
-                let context = {
-                    let _child_span = tracer.span("exec_get_ctx").child_of(&parent_span).start();
-                    self.get_context(
-                        Some(stx.tx_hash.clone()),
-                        Some(stx.raw.nonce.clone()),
-                        &caller,
-                        stx.raw.cycles_price,
-                        stx.raw.cycles_limit,
-                        params,
-                        &stx.raw.request,
-                    )?
-                };
+        let mut receipts = {
+            let child_span = tracer.span("exec_txs").child_of(&parent_span).start();
+            txs.iter()
+                .map(|stx| {
+                    let caller = Address::from_pubkey_bytes(stx.pubkey.clone())?;
+                    let context = {
+                        // let _child_span =
+                        // tracer.span("exec_get_ctx").child_of(&parent_span).start();
+                        self.get_context(
+                            Some(stx.tx_hash.clone()),
+                            Some(stx.raw.nonce.clone()),
+                            &caller,
+                            stx.raw.cycles_price,
+                            stx.raw.cycles_limit,
+                            params,
+                            &stx.raw.request,
+                        )?
+                    };
 
-                let exec_resp = {
-                    let _child_span = tracer
-                        .span("exec_catcha_all")
-                        .child_of(&parent_span)
-                        .start();
-                    self.catch_call(context.clone(), ExecType::Write)?
-                };
+                    let exec_resp = { self.catch_call(context.clone(), ExecType::Write)? };
 
-                Ok(Receipt {
-                    state_root:  MerkleRoot::from_empty(),
-                    height:      context.get_current_height(),
-                    tx_hash:     stx.tx_hash.clone(),
-                    cycles_used: context.get_cycles_used(),
-                    events:      context.get_events(),
-                    response:    ReceiptResponse {
-                        service_name: context.get_service_name().to_owned(),
-                        method:       context.get_service_method().to_owned(),
-                        response:     exec_resp,
-                    },
+                    Ok(Receipt {
+                        state_root:  MerkleRoot::from_empty(),
+                        height:      context.get_current_height(),
+                        tx_hash:     stx.tx_hash.clone(),
+                        cycles_used: context.get_cycles_used(),
+                        events:      context.get_events(),
+                        response:    ReceiptResponse {
+                            service_name: context.get_service_name().to_owned(),
+                            method:       context.get_service_method().to_owned(),
+                            response:     exec_resp,
+                        },
+                    })
                 })
-            })
-            .collect::<Result<Vec<Receipt>, ProtocolError>>()?;
+                .collect::<Result<Vec<Receipt>, ProtocolError>>()?
+        };
 
         {
             let _child_span = tracer

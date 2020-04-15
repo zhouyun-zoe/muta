@@ -359,7 +359,7 @@ impl<S: 'static + Storage, DB: 'static + TrieDB, Mapping: 'static + ServiceMappi
                 };
 
                 let exec_resp = {
-                    let child_span = tracer
+                    let _child_span = tracer
                         .span("exec_catcha_all")
                         .child_of(&parent_span)
                         .start();

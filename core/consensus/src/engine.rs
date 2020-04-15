@@ -76,7 +76,7 @@ impl<Adapter: ConsensusAdapter + 'static> Engine<FixedPill> for ConsensusEngine<
         }
 
         let (ordered_tx_hashes, propose_hashes) = {
-            let child_span = tracer
+            let _child_span = tracer
                 .span("get_txs_from_wal")
                 .child_of(&parent_span)
                 .tag(Tag::new("height", next_height as i64))
@@ -143,7 +143,7 @@ impl<Adapter: ConsensusAdapter + 'static> Engine<FixedPill> for ConsensusEngine<
             inner: pill.clone(),
         };
         let hash = {
-            let child_span = tracer
+            let _child_span = tracer
                 .span("cal_block_header_hash")
                 .child_of(&parent_span)
                 .tag(Tag::new("height", next_height as i64))

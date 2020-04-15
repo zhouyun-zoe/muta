@@ -149,13 +149,6 @@ pub async fn start<Mapping: 'static + ServiceMapping>(
     let (span_tx, span_rx) = crossbeam_channel::bounded(50);
     let tracer = Tracer::with_sender(AllSampler, span_tx);
 
-    let reporter = JaegerCompactReporter::new("muta").unwrap();
-    thread::spawn(move || {
-        while let Ok(span) = span_rx.try_recv() {
-            let _ = reporter.report(&[span]);
-        }
-    });
-
     // Init Block db
     let path_block = config.data_path_for_block();
     log::info!("Data path for block: {:?}", path_block);
@@ -516,6 +509,13 @@ pub async fn start<Mapping: 'static + ServiceMapping>(
     if config.graphql.max_payload_size != 0 {
         graphql_config.max_payload_size = config.graphql.max_payload_size;
     }
+
+    let reporter = JaegerCompactReporter::new("muta").unwrap();
+    thread::spawn(move || {
+        while let Ok(span) = span_rx.try_recv() {
+            let _ = reporter.report(&[span]);
+        }
+    });
 
     tokio::task::spawn_local(async move {
         let local = tokio::task::LocalSet::new();

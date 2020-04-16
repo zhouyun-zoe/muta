@@ -77,7 +77,7 @@ impl<Adapter: ConsensusAdapter + 'static> Engine<FixedPill> for ConsensusEngine<
 
         let (ordered_tx_hashes, propose_hashes) = {
             let _child_span = tracer
-                .span("get_txs_from_wal")
+                .span("get_txs_from_mempool")
                 .child_of(&parent_span)
                 .tag(Tag::new("height", next_height as i64))
                 .start();
@@ -166,7 +166,7 @@ impl<Adapter: ConsensusAdapter + 'static> Engine<FixedPill> for ConsensusEngine<
         let time = Instant::now();
 
         let tracer = self.tracer.clone();
-        let parent_span = tracer.span("consensus_get_block").start();
+        let parent_span = tracer.span("consensus_check_block").start();
 
         if block.inner.block.header.height != block.inner.block.header.proof.height + 1 {
             log::error!("[consensus-engine]: check_block for overlord receives a proposal, error, block height {}, block {:?}", block.inner.block.header.height,block.inner.block);

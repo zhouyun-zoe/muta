@@ -12,8 +12,8 @@ use std::sync::Arc;
 
 use cita_trie::DB as TrieDB;
 use derive_more::{Display, From};
-use rustracing_jaeger::Tracer;
 use rustracing::tag::Tag;
+use rustracing_jaeger::Tracer;
 
 use bytes::BytesMut;
 use protocol::traits::{
